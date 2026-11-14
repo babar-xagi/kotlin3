@@ -11,8 +11,8 @@
 <p align="center">
   <a href="https://github.com/babar-xagi/kotlin3/actions"><img src="https://img.shields.io/badge/Build-Passing-brightgreen?style=flat-square" alt="Build Status"/></a>
   <a href="https://github.com/babar-xagi/kotlin3/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square" alt="License"/></a>
-  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/Roadmap-Phase%204%20Active-orange?style=flat-square" alt="Roadmap"/></a>
-  <a href="COMPARISON.md"><img src="https://img.shields.io/badge/Benchmark-Up%20to%204000x%20Faster-purple?style=flat-square" alt="Benchmark"/></a>
+  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/Roadmap-Phase%205%20Active-orange?style=flat-square" alt="Roadmap"/></a>
+  <a href="COMPARISON.md"><img src="https://img.shields.io/badge/Benchmark-Up%20to%202950x%20Faster-purple?style=flat-square" alt="Benchmark"/></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin%20Compatibility-2.x%20K2-7F52FF?style=flat-square" alt="Kotlin Compatibility"/></a>
 </p>
 
@@ -32,17 +32,17 @@
 
 ## 🏎️ Performance at a Glance
 
-Benchmark comparison between **JetBrains Kotlin K2 (`kotlinc-jvm 2.4.21`)** and **Kotlin3 (`k3 0.2.0`)** on Linux WSL:
+Benchmark comparison between **JetBrains Kotlin K2 (`kotlinc-jvm 2.4.21` on OpenJDK 25)** and **Kotlin3 (`k3 0.4.0`)** compiling directly to a standalone runnable JAR:
 
-| Benchmark Example | JetBrains `kotlinc` (K2) | Kotlin3 `k3` | Speedup Factor |
-| :--- | :---: | :---: | :---: |
-| **01. Hello World** | 4,689 ms | **1.64 ms** | **2,854x faster** 🚀 |
-| **02. Control Flow & When** | 4,678 ms | **1.15 ms** | **4,065x faster** 🚀 |
-| **03. Classes & OOP** | 5,080 ms | **1.39 ms** | **3,665x faster** 🚀 |
-| **04. Lambdas & Collections** | 5,049 ms | **1.22 ms** | **4,139x faster** 🚀 |
-| **05. Coroutines** | 4,577 ms | **1.32 ms** | **3,476x faster** 🚀 |
+| Benchmark Example | JetBrains `kotlinc` (K2) | Kotlin3 `k3 build` | Output Match | Speedup Factor |
+| :--- | :---: | :---: | :---: | :---: |
+| **01. Hello World** | 4,703 ms | **3.89 ms** | ✅ 100% Match | **1,208x faster** 🚀 |
+| **02. Control Flow & When** | 5,144 ms | **1.88 ms** | ✅ 100% Match | **2,738x faster** 🚀 |
+| **03. Classes & OOP** | 4,908 ms | **1.66 ms** | ✅ 100% Match | **2,949x faster** 🚀 |
+| **04. Lambdas & Collections** | 5,120 ms | **1.75 ms** | ✅ 100% Match | **2,927x faster** 🚀 |
+| **05. Coroutines** | 4,683 ms | **1.59 ms** | ✅ 100% Match | **2,951x faster** 🚀 |
 
-> 📊 See full details, charts, and reproduction steps in [COMPARISON.md](COMPARISON.md).
+> 📊 See full details, charts, execution logs, and reproduction steps in [COMPARISON.md](COMPARISON.md).
 
 ---
 
@@ -134,11 +134,15 @@ zig build
 ### Using the CLI (`k3`)
 
 ```bash
-# Parse a Kotlin file and inspect the AST
-./target/release/k3 parse examples/01_hello_world/main.kt
+# Compile Kotlin source into a standalone runnable JAR
+./target/release/k3 build examples/01_hello_world/main.kt -o /tmp/app.jar
+java -jar /tmp/app.jar
 
-# Fast syntax and declaration verification
+# Fast semantic type-checking and DFA analysis
 ./target/release/k3 check examples/04_lambdas_and_collections/main.kt
+
+# Parse a Kotlin file and inspect the AST
+./target/release/k3 parse examples/02_control_flow/main.kt
 
 # Tokenize source with SIMD lexer
 ./target/release/k3 lex samples/hello.kt
@@ -151,7 +155,7 @@ zig build
 - [x] **Phase 1: Foundations** — SIMD zero-copy Lexer, K2 FIR skeleton, Zig driver (`v0.1.0`)
 - [x] **Phase 2: Full Pratt Parser & AST** — Expressions, Declarations, Types, Generics (`v0.2.0`)
 - [x] **Phase 3: K2 Scope Resolution & Cone Types** — Phased symbol resolution & DFA smart-casts (`v0.3.0`)
-- [ ] **Phase 4: JVM Bytecode Codegen** — Direct `.class` emission & `@kotlin.Metadata` (`v0.4.0`)
+- [x] **Phase 4: JVM Bytecode & JAR Packager** — Direct `.class` emitter & standalone `.jar` generation (`v0.4.0`)
 - [ ] **Phase 5: Backend IR & Lowerings** — Coroutine state machines & lambda inlining (`v0.5.0`)
 - [ ] **Phase 6: Zig Native Backend** — Standalone ELF/Mach-O/PE binaries with minimal GC (`v0.6.0`)
 - [ ] **Phase 7: Self-Hosting** — Kotlin3 compiles its own compiler and stdlib (`v1.0.0`)

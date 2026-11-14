@@ -930,6 +930,7 @@ impl<'a> Parser<'a> {
             // Primary Literals
             TokenKind::IntegerLiteral => {
                 self.advance();
+                let is_long = tok.text.ends_with('l') || tok.text.ends_with('L');
                 let clean_text = tok.text.trim_end_matches(|c| c == 'u' || c == 'U' || c == 'l' || c == 'L');
                 let val = if clean_text.starts_with("0x") || clean_text.starts_with("0X") {
                     i64::from_str_radix(&clean_text[2..].replace('_', ""), 16).unwrap_or(0)
@@ -938,7 +939,11 @@ impl<'a> Parser<'a> {
                 } else {
                     clean_text.replace('_', "").parse::<i64>().unwrap_or(0)
                 };
-                Ok(Expression::IntegerLiteral(val, tok.span))
+                if is_long {
+                    Ok(Expression::LongLiteral(val, tok.span))
+                } else {
+                    Ok(Expression::IntegerLiteral(val, tok.span))
+                }
             }
             TokenKind::FloatLiteral => {
                 self.advance();
@@ -1064,16 +1069,16 @@ impl<'a> Parser<'a> {
                 loop {
                     if self.match_token(TokenKind::Is).is_some() {
                         let ty = self.parse_type()?;
-                        conditions.push(WhenCondition::Is(ty, true));
+                        conditions.push(WhenCondition::Is(ty, false));
                     } else if self.match_token(TokenKind::NotIs).is_some() {
                         let ty = self.parse_type()?;
-                        conditions.push(WhenCondition::Is(ty, false));
+                        conditions.push(WhenCondition::Is(ty, true));
                     } else if self.match_token(TokenKind::In).is_some() {
                         let expr = self.parse_expression()?;
-                        conditions.push(WhenCondition::In(expr, true));
+                        conditions.push(WhenCondition::In(expr, false));
                     } else if self.match_token(TokenKind::NotIn).is_some() {
                         let expr = self.parse_expression()?;
-                        conditions.push(WhenCondition::In(expr, false));
+                        conditions.push(WhenCondition::In(expr, true));
                     } else {
                         let expr = self.parse_expression()?;
                         conditions.push(WhenCondition::Expression(expr));

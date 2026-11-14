@@ -1,53 +1,37 @@
-pub struct ClassFile {
-    pub magic: u32,
-    pub minor_version: u16,
-    pub major_version: u16,
-    pub constant_pool: Vec<CpInfo>,
-    pub access_flags: u16,
-    pub this_class: u16,
-    pub super_class: u16,
+pub mod classfile;
+pub mod bytecode;
+pub mod codegen;
+pub mod jar;
+
+pub use classfile::ClassFile;
+pub use bytecode::CodeBuilder;
+pub use codegen::Codegen;
+pub use jar::JarBuilder;
+
+use k3_syntax::ast::KtFile;
+
+pub fn compile_to_classes(file: &KtFile, source_name: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut codegen = Codegen::new();
+    codegen.compile_file(file, source_name)
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum CpInfo {
-    Utf8(String),
-    Integer(i32),
-    Float(f32),
-    Long(i64),
-    Double(f64),
-    Class { name_index: u16 },
-    String { string_index: u16 },
-    Fieldref { class_index: u16, name_and_type_index: u16 },
-    Methodref { class_index: u16, name_and_type_index: u16 },
-    NameAndType { name_index: u16, descriptor_index: u16 },
-}
+pub fn compile_to_jar(file: &KtFile, source_name: &str) -> Result<(String, Vec<u8>), String> {
+    let classes = compile_to_classes(file, source_name)?;
+    let mut jar = JarBuilder::new();
 
-impl Default for ClassFile {
-    fn default() -> Self {
-        Self {
-            magic: 0xCAFEBABE,
-            minor_version: 0,
-            major_version: 65, // Java 21 LTS bytecode
-            constant_pool: vec![],
-            access_flags: 0x0001 | 0x0020, // ACC_PUBLIC | ACC_SUPER
-            this_class: 0,
-            super_class: 0,
+    let mut main_class = None;
+    for (class_name, bytes) in classes {
+        if class_name.ends_with("Kt") {
+            main_class = Some(class_name.clone());
         }
-    }
-}
-
-impl ClassFile {
-    pub fn new() -> Self {
-        Self::default()
+        let file_path = format!("{}.class", class_name);
+        jar.add_file(&file_path, bytes);
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&self.magic.to_be_bytes());
-        bytes.extend_from_slice(&self.minor_version.to_be_bytes());
-        bytes.extend_from_slice(&self.major_version.to_be_bytes());
-        bytes
-    }
+    let main_class_name = main_class.unwrap_or_else(|| "MainKt".to_string());
+    jar.set_main_class(&main_class_name);
+
+    Ok((main_class_name, jar.build()))
 }
 
 #[cfg(test)]
@@ -55,9 +39,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_class_magic() {
-        let cf = ClassFile::new();
+    fn test_classfile_magic() {
+        let mut cf = ClassFile::new("Test", "java/lang/Object");
         let bytes = cf.to_bytes();
         assert_eq!(&bytes[0..4], &[0xCA, 0xFE, 0xBA, 0xBE]);
+    }
+
+    #[test]
+    fn test_jar_structure() {
+        let mut jar = JarBuilder::new();
+        jar.add_file("Test.txt", b"Hello, Kotlin3!".to_vec());
+        jar.set_main_class("TestKt");
+        let bytes = jar.build();
+        assert!(bytes.len() > 30);
+        // ZIP local header starts with PK\x03\x04
+        assert_eq!(&bytes[0..4], &[0x50, 0x4b, 0x03, 0x04]);
     }
 }

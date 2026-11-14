@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use k3_fir::analyze;
+use k3_jvm::compile_to_jar;
 use k3_syntax::{Lexer, Parser as KtParser};
 use std::fs;
 use std::path::PathBuf;
@@ -8,7 +9,7 @@ use std::process;
 #[derive(Parser, Debug)]
 #[command(name = "k3")]
 #[command(author = "Kotlin3 Project")]
-#[command(version = "0.3.0")]
+#[command(version = "0.4.0")]
 #[command(about = "Ultra-fast, next-generation Kotlin compiler and toolchain written in Rust & Zig", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -31,6 +32,14 @@ enum Commands {
     Check {
         /// Source file path (.kt, .kts)
         file: PathBuf,
+    },
+    /// Compile Kotlin source into executable JVM JAR
+    Build {
+        /// Source file path (.kt, .kts)
+        file: PathBuf,
+        /// Output JAR file path
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -103,6 +112,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ast.declarations.len()
                 );
             }
+        }
+        Commands::Build { file, output } => {
+            let content = fs::read_to_string(&file)?;
+            let file_str = file.to_string_lossy();
+            let file_name = file.file_name().unwrap().to_str().unwrap();
+
+            // 1. Lexing
+            let mut lexer = Lexer::new(&content);
+            let tokens = match lexer.tokenize() {
+                Ok(t) => t,
+                Err(err) => {
+                    eprintln!("{}:{}: error: {}", file_str, err.span, err);
+                    process::exit(1);
+                }
+            };
+
+            // 2. Parsing
+            let mut parser = KtParser::new(tokens, content.len() as u32);
+            let ast = match parser.parse_file() {
+                Ok(a) => a,
+                Err(err) => {
+                    eprintln!("{}:{}: syntax error: {}", file_str, err.span, err.message);
+                    process::exit(1);
+                }
+            };
+
+            // 3. FIR Semantic Analysis & Type Checking
+            let (_, diagnostics) = analyze(&ast);
+            let mut has_errors = false;
+            for diag in &diagnostics {
+                eprintln!("{}", diag.format_with_source(&content, &file_str));
+                if diag.severity == k3_fir::DiagnosticSeverity::Error {
+                    has_errors = true;
+                }
+            }
+            if has_errors {
+                eprintln!("\n❌ Compilation aborted due to {} semantic error(s)", diagnostics.len());
+                process::exit(1);
+            }
+
+            // 4. JVM Classfile & JAR Generation
+            let (main_class, jar_bytes) = match compile_to_jar(&ast, file_name) {
+                Ok(res) => res,
+                Err(err) => {
+                    eprintln!("codegen error: {}", err);
+                    process::exit(1);
+                }
+            };
+
+            let out_path = output.unwrap_or_else(|| {
+                let stem = file.file_stem().unwrap().to_str().unwrap();
+                PathBuf::from(format!("{}.jar", stem))
+            });
+
+            fs::write(&out_path, jar_bytes)?;
+            println!("✓ Successfully compiled {} into runnable JAR: {}", file.display(), out_path.display());
+            println!("  Main Class: {}", main_class.replace('/', "."));
+            println!("  Run with:   java -jar {}", out_path.display());
         }
     }
 

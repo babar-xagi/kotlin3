@@ -11,4 +11,5 @@ path = "src/main.rs"
 [dependencies]
 k3_syntax = { path = "../k3_syntax" }
 k3_fir = { path = "../k3_fir" }
+k3_jvm = { path = "../k3_jvm" }
 clap = { workspace = true }

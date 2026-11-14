@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import time
 import subprocess
@@ -19,31 +20,43 @@ results = []
 
 for name, rel_path in examples:
     full_path = os.path.join(base_dir, rel_path)
-    jar_out = f"/tmp/{name}.jar"
+    k2_jar = f"/tmp/{name}_k2.jar"
+    k3_jar = f"/tmp/{name}_k3.jar"
     
-    # 1. Benchmark Official Kotlinc K2
-    k2_cmd = f'cd {base_dir} && {sdkman_init} && kotlinc {full_path} -include-runtime -d {jar_out}'
+    # 1. Benchmark Official Kotlinc K2 (JVM compilation + pack runtime)
+    k2_cmd = f'{sdkman_init} && kotlinc {full_path} -include-runtime -d {k2_jar}'
     start_k2 = time.perf_counter()
     k2_proc = subprocess.run(["bash", "-c", k2_cmd], capture_output=True, text=True)
-    k2_duration = (time.perf_counter() - start_k2) * 1000  # ms
+    k2_compile_ms = (time.perf_counter() - start_k2) * 1000
     k2_ok = (k2_proc.returncode == 0)
 
-    # 2. Benchmark Kotlin3 (k3)
+    # 1b. Run K2 JAR
+    k2_run_proc = subprocess.run(["java", "-jar", k2_jar], capture_output=True, text=True)
+    k2_output = k2_run_proc.stdout.strip()
+
+    # 2. Benchmark Kotlin3 (k3 build)
     start_k3 = time.perf_counter()
-    k3_proc = subprocess.run([k3_bin, "check", full_path], capture_output=True, text=True)
-    k3_duration = (time.perf_counter() - start_k3) * 1000  # ms
+    k3_proc = subprocess.run([k3_bin, "build", full_path, "-o", k3_jar], capture_output=True, text=True)
+    k3_compile_ms = (time.perf_counter() - start_k3) * 1000
     k3_ok = (k3_proc.returncode == 0)
 
-    speedup = (k2_duration / k3_duration) if k3_duration > 0 else 0
+    # 2b. Run k3 JAR
+    k3_run_proc = subprocess.run(["java", "-jar", k3_jar], capture_output=True, text=True)
+    k3_output = k3_run_proc.stdout.strip()
+
+    speedup = (k2_compile_ms / k3_compile_ms) if k3_compile_ms > 0 else 0
+    outputs_match = (k2_output == k3_output)
 
     results.append({
         "name": name,
         "file": rel_path,
-        "k2_time_ms": round(k2_duration, 2),
+        "k2_compile_ms": round(k2_compile_ms, 2),
         "k2_ok": k2_ok,
-        "k3_time_ms": round(k3_duration, 2),
+        "k3_compile_ms": round(k3_compile_ms, 2),
         "k3_ok": k3_ok,
-        "speedup": round(speedup, 1)
+        "speedup": round(speedup, 1),
+        "outputs_match": outputs_match,
+        "output": k3_output,
     })
 
 print(json.dumps(results, indent=2))

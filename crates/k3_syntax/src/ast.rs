@@ -209,6 +209,7 @@ pub enum Statement {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     IntegerLiteral(i64, Span),
+    LongLiteral(i64, Span),
     FloatLiteral(f64, Span),
     BooleanLiteral(bool, Span),
     StringLiteral(String, Span),
@@ -287,6 +288,7 @@ impl Expression {
     pub fn span(&self) -> Span {
         match self {
             Expression::IntegerLiteral(_, s)
+            | Expression::LongLiteral(_, s)
             | Expression::FloatLiteral(_, s)
             | Expression::BooleanLiteral(_, s)
             | Expression::StringLiteral(_, s)

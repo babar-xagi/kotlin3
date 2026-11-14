@@ -293,6 +293,7 @@ impl Resolver {
     pub fn resolve_expression(&mut self, expr: &Expression, scope: &mut Scope) -> ConeKotlinType {
         match expr {
             Expression::IntegerLiteral(_, _) => ConeKotlinType::int(),
+            Expression::LongLiteral(_, _) => ConeKotlinType::long(),
             Expression::FloatLiteral(_, _) => ConeKotlinType::double(),
             Expression::BooleanLiteral(_, _) => ConeKotlinType::boolean(),
             Expression::StringLiteral(_, _) => ConeKotlinType::string(),
@@ -525,7 +526,7 @@ impl Resolver {
                     // Apply smart-casts from when conditions (e.g. `is String`)
                     if let Some(var_name) = &subject_name {
                         for cond in &entry.conditions {
-                            if let WhenCondition::Is(ty_ref, true) = cond {
+                            if let WhenCondition::Is(ty_ref, false) = cond {
                                 let target_type = self.convert_type_ref(ty_ref, scope);
                                 self.dfa.record_smart_cast(var_name, target_type);
                             }
