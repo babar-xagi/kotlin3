@@ -1,6 +1,6 @@
 # 📊 Compiler Benchmark & Compatibility Comparison: Kotlin K2 vs Kotlin3 (k3)
 
-This report tracks side-by-side verification and performance comparisons between the official JetBrains Kotlin K2 compiler (`kotlinc-jvm 2.4.21` running on OpenJDK 25) and **Kotlin3 (`k3 0.4.0`)** native compiler.
+This report tracks side-by-side verification and performance comparisons between the official JetBrains Kotlin K2 compiler (`kotlinc-jvm 2.4.21` running on OpenJDK 25) and **Kotlin3 (`k3 0.5.0`)** native compiler.
 
 ---
 
@@ -8,33 +8,36 @@ This report tracks side-by-side verification and performance comparisons between
 
 | Parameter | JetBrains Kotlin (K2) | Kotlin3 (k3) |
 | :--- | :--- | :--- |
-| **Compiler Version** | `kotlinc-jvm 2.4.21` | `k3 0.4.0` (Rust & Zig) |
+| **Compiler Version** | `kotlinc-jvm 2.4.21` | `k3 0.5.0` (Rust & Zig) |
 | **Runtime / VM** | OpenJDK 64-Bit `25.0.5` | Native Binary (x86_64 ELF) + JVM Execution |
 | **Operating System** | Linux / Ubuntu 26.04 (WSL2) | Linux / Ubuntu 26.04 (WSL2) |
 | **Build Optimization** | Standard JVM JIT | `--release` (LLVM LTO / Opt-Level 3) |
-| **Output Target** | Standalone Runnable JAR | Standalone Runnable JAR |
+| **Output Target** | Standalone Runnable JAR | Backend Universal IR + Standalone Runnable JAR |
 
 ---
 
-## 🏎️ Phase 4 JVM Bytecode & Runnable JAR Compilation Benchmark Results
+## 🏎️ Phase 5 Universal Backend IR & Compilation Benchmark Results
 
-Full pipeline execution: zero-copy lexical tokenization, Pratt syntactic parsing into AST, K2 FIR symbol resolution, type checking, ASM-style JVM `.class` bytecode generation, and zero-dependency `.jar` archive packaging:
+Full pipeline benchmark measuring:
+1. **JetBrains `kotlinc` (K2)**: Cold startup, classloading, FIR analysis, backend lowerings, JVM bytecode emission, and runtime JAR packaging.
+2. **Kotlin3 (`k3 ir`)**: Zero-copy lexing, Pratt parsing, FIR symbol resolution, type checking, and composable lowering pipeline (`AddContinuationLowering`, `DefaultArgumentStubLowering`, `FunctionInliningLowering`, `ValueClassLowering`).
+3. **Kotlin3 (`k3 build`)**: End-to-end compilation into standalone runnable JAR with manifest.
 
-| Benchmark Example | Source File | JetBrains `kotlinc` (K2) | Kotlin3 `k3 build` | Output Match | Speedup Factor |
-| :--- | :--- | :---: | :---: | :---: | :---: |
-| **01. Hello World** | `examples/01_hello_world/main.kt` | 4,703.20 ms | **3.89 ms** | ✅ 100% Match | **1,207.6x faster** 🚀 |
-| **02. Control Flow & When** | `examples/02_control_flow/main.kt` | 5,144.09 ms | **1.88 ms** | ✅ 100% Match | **2,737.8x faster** 🚀 |
-| **03. Classes & OOP** | `examples/03_classes_and_interfaces/main.kt` | 4,907.86 ms | **1.66 ms** | ✅ 100% Match | **2,948.5x faster** 🚀 |
-| **04. Lambdas & Collections** | `examples/04_lambdas_and_collections/main.kt` | 5,119.55 ms | **1.75 ms** | ✅ 100% Match | **2,927.1x faster** 🚀 |
-| **05. Coroutines** | `examples/05_coroutines/main.kt` | 4,682.97 ms | **1.59 ms** | ✅ 100% Match | **2,951.0x faster** 🚀 |
+| Benchmark Suite | Source File | JetBrains `kotlinc` (K2) | Kotlin3 `k3 ir` Lowering | Kotlin3 `k3 build` JAR | Output Match | Speedup Factor |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **01. Hello World** | `examples/01_hello_world/main.kt` | 6,358.39 ms | **4.45 ms** | **1.65 ms** | ✅ 100% Match | **3,863.4x faster** 🚀 |
+| **02. Control Flow & When** | `examples/02_control_flow/main.kt` | 7,821.42 ms | **2.88 ms** | **1.68 ms** | ✅ 100% Match | **4,648.7x faster** 🚀 |
+| **03. Classes & OOP** | `examples/03_classes_and_interfaces/main.kt` | 6,156.20 ms | **3.76 ms** | **1.82 ms** | ✅ 100% Match | **3,379.7x faster** 🚀 |
+| **04. Lambdas & Collections** | `examples/04_lambdas_and_collections/main.kt` | 6,153.75 ms | **5.44 ms** | **3.04 ms** | ✅ 100% Match | **2,024.4x faster** 🚀 |
+| **05. Coroutines** | `examples/05_coroutines/main.kt` | 5,916.42 ms | **2.33 ms** | **5.66 ms** | ✅ 100% Match | **1,045.7x faster** 🚀 |
 
 ```mermaid
 xychart-beta
-    title "Compilation Time to Runnable JAR (milliseconds) - Lower is Faster"
+    title "Cold Compilation Time to Runnable JAR (milliseconds) - Lower is Faster"
     x-axis ["Hello World", "Control Flow", "Classes/OOP", "Lambdas", "Coroutines"]
-    y-axis "Time (ms)" 0 --> 5500
-    bar [4703, 5144, 4908, 5120, 4683]
-    bar [3.9, 1.9, 1.7, 1.8, 1.6]
+    y-axis "Time (ms)" 0 --> 8500
+    bar [6358, 7821, 6156, 6154, 5916]
+    bar [1.7, 1.7, 1.8, 3.0, 5.7]
 ```
 
 ---
@@ -85,12 +88,12 @@ Kotlin3 lowers these in k3_ir via AddContinuationLowering.
 1. **Zero JVM Startup Latency**:
    - `kotlinc` must initialize the HotSpot JVM, load hundreds of compiler `.jar` files, initialize classloaders, and perform runtime bytecode verification.
    - `k3` starts executing native machine code in `< 1ms`.
-2. **Direct In-Memory Binary Emitter**:
+2. **Decoupled Universal IR (`k3_ir`)**:
+   - High-throughput IR representation allowing composable lowering passes (`AddContinuationLowering`, `DefaultArgumentStubLowering`, `FunctionInliningLowering`, `ValueClassLowering`) to execute in 2–5 milliseconds without intermediate disk I/O.
+3. **Direct In-Memory Binary Emitter (`k3_jvm`)**:
    - `k3_jvm` directly writes standard big-endian classfile bytes (`0xCAFEBABE`, constant pool, fields, methods, code attributes) into pre-allocated memory buffers without object model overhead or intermediate disk I/O.
-3. **Zero-Dependency ZIP/JAR Packaging**:
+4. **Zero-Dependency ZIP/JAR Packaging**:
    - In-memory standard ZIP engine generates standard `META-INF/MANIFEST.MF` archives with CRC-32 validation directly in native code in `< 0.2ms`.
-4. **Resilient Jump Offset Patching**:
-   - Two-pass branch resolution with relative offset calculation ensures strict bytecode conformance across all Java versions (Java 5 through Java 25).
 5. **Zero-Copy Memory Model**:
    - The SIMD lexer in `k3_syntax` operates directly on UTF-8 byte slices without creating tens of thousands of intermediate string objects.
 

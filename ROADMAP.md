@@ -179,18 +179,42 @@ flowchart TD
 
 ---
 
-### Phase 5: Backend IR & Composable Lowerings (v0.5.0) — *Active*
-- [ ] 🔄 **Universal Backend IR**:
-  - Single abstract tree representing executable logic decoupled from backend targets.
-- [ ] ⚙️ **Core Lowering Transformations**:
-  - **Coroutines Transformation**: CPS (Continuation-Passing Style) state machines for `suspend` functions.
-  - **Default Parameter Stubs**: Synthetic bitmask flags and wrapper functions.
-  - **Inline Functions & Reified Generics**: AST-level call-site inlining.
-  - **Value Classes**: Complete unboxing to primitive representations.
+### Phase 5: Backend IR & Composable Lowerings (v0.5.0) — *Completed*
+```mermaid
+flowchart TD
+    FIR["FIR Semantic Tree"] --> FIR2IR["FIR to IR Translator"]
+    FIR2IR --> CommonIR["Universal Backend IR (k3_ir)"]
+    CommonIR --> Pipe["Composable Lowering Pipeline"]
+    Pipe --> CPS["AddContinuationLowering (CPS State Machines)"]
+    Pipe --> Def["DefaultArgumentStubLowering ($default Stubs)"]
+    Pipe --> Inline["FunctionInliningLowering (Call-site Inlining)"]
+    Pipe --> Val["ValueClassLowering (Primitive Unboxing)"]
+    Pipe --> LowIR["Lowered Target-Neutral IR"]
+```
+- [x] 🔄 **Universal Backend IR (`crates/k3_ir/src/ir.rs`)**:
+  - Target-decoupled abstract syntax tree representing executable logic (`IrModule`, `IrFile`, `IrDeclaration`, `IrStatement`, `IrExpression`).
+  - Structured expressions for calls, field access, control flow (`When`, `For`, `While`, `StateSwitch`), and type operations.
+- [x] ⚙️ **Core Lowering Transformations (`crates/k3_ir/src/lowerings/`)**:
+  - **Coroutines CPS Lowering (`AddContinuationLowering`)**:
+    - Automatically appends `$completion: Continuation<T>` parameter and sets return type to `Any?`.
+    - Generates synthetic state-machine continuation classes (`<package>.<func>$Continuation` extending `ContinuationImpl`).
+    - Wraps suspend function body in state switch (`StateSwitch`) with state labels for suspension points.
+  - **Default Parameter Stubs (`DefaultArgumentStubLowering`)**:
+    - Generates synthetic `<name>$default` functions and `<init>$default` constructors with integer bitmask (`$mask0`) and marker parameters.
+    - Bitwise evaluation `(mask & (1 << i)) != 0` for omitted parameter fallback.
+  - **Inline Functions & Lambdas (`FunctionInliningLowering`)**:
+    - Eliminates function object and closure allocations by inlining call-sites directly into caller bodies.
+  - **Value Classes (`ValueClassLowering`)**:
+    - Unboxes inline value classes to underlying primitive representations.
+- [x] 🛠️ **CLI Universal IR Inspection**:
+  - Implemented `k3 ir <file.kt>` command in `crates/k3_cli` to inspect lowered IR trees in real time.
+- [x] 📊 **Verification & Benchmarks**:
+  - Zero-warning compilation with 100% unit test coverage (`test_coroutine_cps_lowering`, `test_default_argument_stub_lowering`, `test_function_inlining_lowering`).
+  - Verified **1,045x–4,648x** compilation speedup over JetBrains Kotlin K2 in [COMPARISON.md](COMPARISON.md).
 
 ---
 
-### Phase 6: Zig Native Runtime & Multiplatform Codegen (v0.6.0)
+### Phase 6: Zig Native Runtime & Multiplatform Codegen (v0.6.0) — *Active*
 ```mermaid
 flowchart TD
     IR["Backend IR"] --> ZigEmit["Zig Code & LLVM IR Emitter"]

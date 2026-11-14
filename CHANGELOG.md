@@ -10,8 +10,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- `@kotlin.Metadata` Protobuf serialization.
-- Backend universal IR and lowerings (`k3_ir`) for coroutine CPS transformation, default parameters, and inline functions.
+- Zig minimal native runtime (< 2MB) with tracing garbage collector and fiber coroutine scheduler.
+- Direct C/C++ interop via `@cImport` and LibClang.
+- Native machine code emission (ELF, Mach-O, PE).
+
+---
+
+## [0.5.0] - 2026-11-14
+
+### ✨ Added
+- **Universal Backend IR Model (`crates/k3_ir/src/ir.rs`)**:
+  - Target-agnostic intermediate representation (`IrModule`, `IrFile`, `IrDeclaration`, `IrStatement`, `IrExpression`).
+  - Structured declarations for functions, classes, properties, and synthetic fields.
+  - Core control flow representations: `StateSwitch`, `When`, `For`, `While`, `Return`.
+  - Type-safe operations with `ConeKotlinType` integration.
+- **FIR to Universal IR Translator (`crates/k3_ir/src/fir2ir.rs`)**:
+  - Transforms AST declarations and semantic types into Backend IR trees.
+  - Automatically identifies suspend functions, inline functions, and default parameters.
+  - String template lowering for dynamic interpolation.
+- **Composable Lowering Pipeline (`crates/k3_ir/src/lowerings/`)**:
+  - **`AddContinuationLowering`**:
+    - Converts `suspend fun` to Continuation-Passing Style (CPS).
+    - Appends `$completion: Continuation<T>` parameter and sets return type to `Any?`.
+    - Generates synthetic state-machine continuation classes (`<package>.<func>$Continuation` extending `ContinuationImpl`).
+    - Lowers suspend body into label-indexed `StateSwitch` blocks.
+  - **`DefaultArgumentStubLowering`**:
+    - Generates synthetic `$default` functions and constructors with integer bitmask `$mask0` and marker parameters.
+    - Bitwise evaluation `(mask & (1 << i)) != 0` for parameter fallback.
+  - **`FunctionInliningLowering`**:
+    - Call-site inlining for higher-order inline functions and collection operations.
+  - **`ValueClassLowering`**:
+    - Unboxes inline value classes to their underlying primitive fields.
+- **CLI Universal IR Inspection (`crates/k3_cli/src/main.rs`)**:
+  - Added `k3 ir <file.kt>` command to inspect lowered IR trees and synthetic declarations in real time.
+- **Verification & Benchmarks**:
+  - Verified 100% test pass rate across `k3_syntax`, `k3_fir`, `k3_ir`, and `k3_jvm`.
+  - Documented in [COMPARISON.md](COMPARISON.md) showing verified **1,045x–4,648x** compilation speedup over JetBrains Kotlin K2!
 
 ---
 

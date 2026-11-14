@@ -34,13 +34,19 @@ for name, rel_path in examples:
     k2_run_proc = subprocess.run(["java", "-jar", k2_jar], capture_output=True, text=True)
     k2_output = k2_run_proc.stdout.strip()
 
-    # 2. Benchmark Kotlin3 (k3 build)
+    # 2. Benchmark Kotlin3 IR Lowering (k3 ir)
+    start_ir = time.perf_counter()
+    k3_ir_proc = subprocess.run([k3_bin, "ir", full_path], capture_output=True, text=True)
+    k3_ir_ms = (time.perf_counter() - start_ir) * 1000
+    ir_ok = (k3_ir_proc.returncode == 0)
+
+    # 3. Benchmark Kotlin3 Full Build to Runnable JAR (k3 build)
     start_k3 = time.perf_counter()
     k3_proc = subprocess.run([k3_bin, "build", full_path, "-o", k3_jar], capture_output=True, text=True)
     k3_compile_ms = (time.perf_counter() - start_k3) * 1000
     k3_ok = (k3_proc.returncode == 0)
 
-    # 2b. Run k3 JAR
+    # 3b. Run k3 JAR
     k3_run_proc = subprocess.run(["java", "-jar", k3_jar], capture_output=True, text=True)
     k3_output = k3_run_proc.stdout.strip()
 
@@ -52,6 +58,8 @@ for name, rel_path in examples:
         "file": rel_path,
         "k2_compile_ms": round(k2_compile_ms, 2),
         "k2_ok": k2_ok,
+        "k3_ir_ms": round(k3_ir_ms, 2),
+        "k3_ir_ok": ir_ok,
         "k3_compile_ms": round(k3_compile_ms, 2),
         "k3_ok": k3_ok,
         "speedup": round(speedup, 1),
