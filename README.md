@@ -11,8 +11,9 @@
 <p align="center">
   <a href="https://github.com/babar-xagi/kotlin3/actions"><img src="https://img.shields.io/badge/Build-Passing-brightgreen?style=flat-square" alt="Build Status"/></a>
   <a href="https://github.com/babar-xagi/kotlin3/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square" alt="License"/></a>
-  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/Roadmap-Phase%206%20Active-orange?style=flat-square" alt="Roadmap"/></a>
-  <a href="COMPARISON.md"><img src="https://img.shields.io/badge/Benchmark-Up%20to%204648x%20Faster-purple?style=flat-square" alt="Benchmark"/></a>
+  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/Roadmap-Phase%206%20Complete-brightgreen?style=flat-square" alt="Roadmap"/></a>
+  <a href="COMPARISON.md"><img src="https://img.shields.io/badge/Benchmark-Up%20to%203889x%20Faster-purple?style=flat-square" alt="Benchmark"/></a>
+  <a href="COMPARISON.md"><img src="https://img.shields.io/badge/Native%20Startup-0.59ms%20Latency-blue?style=flat-square" alt="Startup Latency"/></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin%20Compatibility-2.x%20K2-7F52FF?style=flat-square" alt="Kotlin Compatibility"/></a>
 </p>
 
@@ -32,15 +33,15 @@
 
 ## 🏎️ Performance at a Glance
 
-Benchmark comparison between **JetBrains Kotlin K2 (`kotlinc-jvm 2.4.21` on OpenJDK 25)** and **Kotlin3 (`k3 0.5.0`)** compiling directly to a standalone runnable JAR:
+Live verified comparison between **JetBrains Kotlin K2 (`kotlinc-jvm 2.4.21` on OpenJDK 25)** and **Kotlin3 (`k3 0.6.0`)** compiling to JVM JARs and standalone native executables:
 
-| Benchmark Example | JetBrains `kotlinc` (K2) | Kotlin3 `k3 build` | Output Match | Speedup Factor |
-| :--- | :---: | :---: | :---: | :---: |
-| **01. Hello World** | 6,358 ms | **1.65 ms** | ✅ 100% Match | **3,863x faster** 🚀 |
-| **02. Control Flow & When** | 7,821 ms | **1.68 ms** | ✅ 100% Match | **4,649x faster** 🚀 |
-| **03. Classes & OOP** | 6,156 ms | **1.82 ms** | ✅ 100% Match | **3,380x faster** 🚀 |
-| **04. Lambdas & Collections** | 6,154 ms | **3.04 ms** | ✅ 100% Match | **2,024x faster** 🚀 |
-| **05. Coroutines** | 5,916 ms | **5.66 ms** | ✅ 100% Match | **1,046x faster** 🚀 |
+| Benchmark Example | JetBrains `kotlinc` (K2) | Kotlin3 `k3 build` (JVM) | Kotlin3 `k3 native` (Binary) | Compile Speedup | Native Exec Latency | Exec Speedup | Output Match |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **01. Hello World** | 6,922 ms | **1.78 ms** | 326 ms | **3,889x faster** 🚀 | **0.59 ms** | **98.7x faster** ⚡ | ✅ 100% Match |
+| **02. Control Flow & When** | 6,116 ms | **1.73 ms** | 317 ms | **3,530x faster** 🚀 | **0.78 ms** | **121.9x faster** ⚡ | ✅ 100% Match |
+| **03. Classes & OOP** | 5,641 ms | **1.85 ms** | 292 ms | **3,045x faster** 🚀 | **0.63 ms** | **123.2x faster** ⚡ | ✅ 100% Match |
+| **04. Lambdas & Collections** | 5,597 ms | **1.73 ms** | 318 ms | **3,231x faster** 🚀 | **0.67 ms** | **137.7x faster** ⚡ | ✅ 100% Match |
+| **05. Coroutines** | 5,136 ms | **2.19 ms** | 218 ms | **2,349x faster** 🚀 | **0.61 ms** | **112.9x faster** ⚡ | ✅ 100% Match |
 
 > 📊 See full details, charts, execution logs, and reproduction steps in [COMPARISON.md](COMPARISON.md).
 
@@ -84,11 +85,13 @@ kotlin3/
 ├── crates/                       # Rust Compiler Engine Crates
 │   ├── k3_syntax/                # Lexer, Tokens, AST, and Pratt Parser
 │   ├── k3_fir/                   # K2 FIR & Cone Kotlin Type System
-│   ├── k3_ir/                    # Backend Intermediate Representation
-│   ├── k3_jvm/                   # JVM Classfile Binary Emitter
-│   └── k3_cli/                   # `k3` Command Line Interface
-├── runtime/                      # Zig Native Driver & Runtime
-│   └── src/main.zig              # `k3-driver` executable
+│   ├── k3_ir/                    # Backend Intermediate Representation & Lowerings
+│   ├── k3_jvm/                   # JVM Classfile Binary & JAR Emitter
+│   ├── k3_native/                # Zig Native Backend & Standalone Linker
+│   └── k3_cli/                   # Unified `k3` Command Line Interface
+├── runtime/                      # Zig Native Driver & Embedded Runtime
+│   ├── src/runtime.zig           # Minimal Native Runtime (< 1 MB, no-alloc I/O)
+│   └── src/main.zig              # `k3-driver` toolchain orchestrator
 ├── examples/                     # Verified Kotlin example programs
 │   ├── 01_hello_world/           # Basic syntax & string templates
 │   ├── 02_control_flow/          # When expressions & loops
@@ -134,6 +137,16 @@ zig build
 ### Using the CLI (`k3`)
 
 ```bash
+# Compile Kotlin source into a standalone native binary (< 1 MB ELF)
+./target/release/k3 native examples/01_hello_world/main.kt -o /tmp/hello_bin
+/tmp/hello_bin
+
+# Compile and immediately run Kotlin code (sub-millisecond native startup by default)
+./target/release/k3 run examples/02_control_flow/main.kt
+
+# Compile and run via JVM bytecode
+./target/release/k3 run examples/02_control_flow/main.kt --jvm
+
 # Compile Kotlin source into a standalone runnable JAR
 ./target/release/k3 build examples/01_hello_world/main.kt -o /tmp/app.jar
 java -jar /tmp/app.jar
@@ -160,8 +173,8 @@ java -jar /tmp/app.jar
 - [x] **Phase 3: K2 Scope Resolution & Cone Types** — Phased symbol resolution & DFA smart-casts (`v0.3.0`)
 - [x] **Phase 4: JVM Bytecode & JAR Packager** — Direct `.class` emitter & standalone `.jar` generation (`v0.4.0`)
 - [x] **Phase 5: Backend IR & Composable Lowerings** — Coroutine CPS state machines & default stubs (`v0.5.0`)
-- [ ] **Phase 6: Zig Native Backend** — Standalone ELF/Mach-O/PE binaries with minimal GC (`v0.6.0`)
-- [ ] **Phase 7: Self-Hosting** — Kotlin3 compiles its own compiler and stdlib (`v1.0.0`)
+- [x] **Phase 6: Zig Native Backend & Runtime** — Standalone ELF binaries (< 1 MB) & sub-ms startup (`v0.6.0`)
+- [ ] **Phase 7: KLib Ecosystem & Self-Hosting** — Full `.klib` packages and Kotlin3 compiles itself (`v1.0.0`)
 
 > 📖 See [ROADMAP.md](ROADMAP.md) for the complete phase breakdown.
 

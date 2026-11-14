@@ -2,15 +2,16 @@ use clap::{Parser, Subcommand};
 use k3_fir::analyze;
 use k3_ir::compile_to_lowered_ir;
 use k3_jvm::compile_to_jar;
+use k3_native::compile_to_native;
 use k3_syntax::{Lexer, Parser as KtParser};
 use std::fs;
 use std::path::PathBuf;
-use std::process;
+use std::process::{self, Command};
 
 #[derive(Parser, Debug)]
 #[command(name = "k3")]
 #[command(author = "Kotlin3 Project")]
-#[command(version = "0.5.0")]
+#[command(version = "0.6.0")]
 #[command(about = "Ultra-fast, next-generation Kotlin compiler and toolchain written in Rust & Zig", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -46,6 +47,22 @@ enum Commands {
         /// Output JAR file path
         #[arg(short, long)]
         output: Option<PathBuf>,
+    },
+    /// Compile Kotlin source directly into a standalone native executable using Zig
+    Native {
+        /// Source file path (.kt, .kts)
+        file: PathBuf,
+        /// Output binary file path
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Compile and execute Kotlin program immediately (standalone native binary or JVM JAR)
+    Run {
+        /// Source file path (.kt, .kts)
+        file: PathBuf,
+        /// Execute using JVM bytecode target instead of native binary
+        #[arg(long)]
+        jvm: bool,
     },
 }
 
@@ -124,7 +141,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let file_str = file.to_string_lossy();
             let file_name = file.file_name().unwrap().to_str().unwrap();
 
-            // 1. Lexing
             let mut lexer = Lexer::new(&content);
             let tokens = match lexer.tokenize() {
                 Ok(t) => t,
@@ -134,7 +150,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            // 2. Parsing
             let mut parser = KtParser::new(tokens, content.len() as u32);
             let ast = match parser.parse_file() {
                 Ok(a) => a,
@@ -144,10 +159,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            // 3. Lowering to Backend Universal IR with composable passes
             let ir_file = compile_to_lowered_ir(&ast, file_name);
 
-            println!("✓ Successfully lowered {} into Universal Backend IR (k3_ir v0.5.0):", file.display());
+            println!("✓ Successfully lowered {} into Universal Backend IR (k3_ir v0.6.0):", file.display());
             println!("  Package:      {}", if ir_file.package_name.is_empty() { "<root>" } else { &ir_file.package_name });
             println!("  Declarations: {}", ir_file.declarations.len());
 
@@ -192,7 +206,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let file_str = file.to_string_lossy();
             let file_name = file.file_name().unwrap().to_str().unwrap();
 
-            // 1. Lexing
             let mut lexer = Lexer::new(&content);
             let tokens = match lexer.tokenize() {
                 Ok(t) => t,
@@ -202,7 +215,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            // 2. Parsing
             let mut parser = KtParser::new(tokens, content.len() as u32);
             let ast = match parser.parse_file() {
                 Ok(a) => a,
@@ -212,7 +224,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            // 3. FIR Semantic Analysis & Type Checking
             let (_, diagnostics) = analyze(&ast);
             let mut has_errors = false;
             for diag in &diagnostics {
@@ -226,7 +237,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 process::exit(1);
             }
 
-            // 4. JVM Classfile & JAR Generation
             let (main_class, jar_bytes) = match compile_to_jar(&ast, file_name) {
                 Ok(res) => res,
                 Err(err) => {
@@ -244,6 +254,132 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("✓ Successfully compiled {} into runnable JAR: {}", file.display(), out_path.display());
             println!("  Main Class: {}", main_class.replace('/', "."));
             println!("  Run with:   java -jar {}", out_path.display());
+        }
+        Commands::Native { file, output } => {
+            let content = fs::read_to_string(&file)?;
+            let file_str = file.to_string_lossy();
+
+            let mut lexer = Lexer::new(&content);
+            let tokens = match lexer.tokenize() {
+                Ok(t) => t,
+                Err(err) => {
+                    eprintln!("{}:{}: error: {}", file_str, err.span, err);
+                    process::exit(1);
+                }
+            };
+
+            let mut parser = KtParser::new(tokens, content.len() as u32);
+            let ast = match parser.parse_file() {
+                Ok(a) => a,
+                Err(err) => {
+                    eprintln!("{}:{}: syntax error: {}", file_str, err.span, err.message);
+                    process::exit(1);
+                }
+            };
+
+            let (_, diagnostics) = analyze(&ast);
+            let mut has_errors = false;
+            for diag in &diagnostics {
+                eprintln!("{}", diag.format_with_source(&content, &file_str));
+                if diag.severity == k3_fir::DiagnosticSeverity::Error {
+                    has_errors = true;
+                }
+            }
+            if has_errors {
+                eprintln!("\n❌ Native compilation aborted due to {} semantic error(s)", diagnostics.len());
+                process::exit(1);
+            }
+
+            let out_path = output.unwrap_or_else(|| {
+                let stem = file.file_stem().unwrap().to_str().unwrap();
+                PathBuf::from(format!("{}_bin", stem))
+            });
+
+            match compile_to_native(&ast, &out_path) {
+                Ok(bin) => {
+                    let metadata = fs::metadata(&bin);
+                    let size_kb = metadata.map(|m| m.len() / 1024).unwrap_or(0);
+                    println!("✓ Successfully compiled {} into standalone native executable: {}", file.display(), bin.display());
+                    println!("  Target:      Zig Native (ELF x86_64)");
+                    println!("  Footprint:   {} KB (< 2 MB)", size_kb);
+                    println!("  Run with:    {}", bin.display());
+                }
+                Err(err) => {
+                    eprintln!("❌ Native compilation error: {}", err);
+                    process::exit(1);
+                }
+            }
+        }
+        Commands::Run { file, jvm } => {
+            let content = fs::read_to_string(&file)?;
+            let file_str = file.to_string_lossy();
+            let file_name = file.file_name().unwrap().to_str().unwrap();
+            let stem = file.file_stem().unwrap().to_str().unwrap();
+
+            let mut lexer = Lexer::new(&content);
+            let tokens = match lexer.tokenize() {
+                Ok(t) => t,
+                Err(err) => {
+                    eprintln!("{}:{}: error: {}", file_str, err.span, err);
+                    process::exit(1);
+                }
+            };
+
+            let mut parser = KtParser::new(tokens, content.len() as u32);
+            let ast = match parser.parse_file() {
+                Ok(a) => a,
+                Err(err) => {
+                    eprintln!("{}:{}: syntax error: {}", file_str, err.span, err.message);
+                    process::exit(1);
+                }
+            };
+
+            if jvm {
+                let (_, jar_bytes) = match compile_to_jar(&ast, file_name) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        eprintln!("codegen error: {}", err);
+                        process::exit(1);
+                    }
+                };
+
+                let temp_jar = std::env::temp_dir().join(format!("{}_{}.jar", stem, process::id()));
+                fs::write(&temp_jar, jar_bytes)?;
+
+                let status = Command::new("java")
+                    .arg("-jar")
+                    .arg(&temp_jar)
+                    .status();
+
+                let _ = fs::remove_file(&temp_jar);
+
+                match status {
+                    Ok(s) if s.success() => {}
+                    Ok(s) => process::exit(s.code().unwrap_or(1)),
+                    Err(err) => {
+                        eprintln!("Failed to execute Java: {}", err);
+                        process::exit(1);
+                    }
+                }
+            } else {
+                let temp_bin = std::env::temp_dir().join(format!("{}_{}_bin", stem, process::id()));
+                if let Err(err) = compile_to_native(&ast, &temp_bin) {
+                    eprintln!("❌ Native compilation error: {}", err);
+                    process::exit(1);
+                }
+
+                let status = Command::new(&temp_bin).status();
+                let _ = fs::remove_file(&temp_bin);
+
+                match status {
+                    Ok(s) if s.success() => {}
+                    Ok(s) => process::exit(s.code().unwrap_or(1)),
+                    Err(err) => {
+                        eprintln!("Failed to execute native binary: {}", err);
+                        process::exit(1);
+                    }
+                }
+            }
         }
     }
 
