@@ -1,0 +1,8 @@
+[package]
+name = "k3_jvm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }

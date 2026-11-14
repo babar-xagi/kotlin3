@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "crates/k3_syntax",
+    "crates/k3_fir",
+    "crates/k3_ir",
+    "crates/k3_jvm",
+    "crates/k3_cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+logos = "0.14"
+thiserror = "2.0"
+indexmap = "2.7"
+smallvec = "1.13"
+clap = { version = "4.5", features = ["derive"] }
