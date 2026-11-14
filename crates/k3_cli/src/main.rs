@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use k3_fir::analyze;
 use k3_ir::compile_to_lowered_ir;
 use k3_jvm::compile_to_jar;
-use k3_native::compile_to_native;
+use k3_native::{compile_to_native, is_zig_available};
 use k3_syntax::{Lexer, Parser as KtParser};
 use std::fs;
 use std::path::PathBuf;
@@ -60,10 +60,102 @@ enum Commands {
     Run {
         /// Source file path (.kt, .kts)
         file: PathBuf,
-        /// Execute using JVM bytecode target instead of native binary
+        /// Optional output file path to save the compiled executable or JAR
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Force execution using JVM bytecode target instead of native binary
         #[arg(long)]
         jvm: bool,
+        /// Force execution using standalone native binary target
+        #[arg(long)]
+        native: bool,
     },
+}
+
+fn find_java() -> Option<PathBuf> {
+    // 1. Check JAVA_HOME
+    if let Ok(jh) = std::env::var("JAVA_HOME") {
+        let exe = if cfg!(windows) { "java.exe" } else { "java" };
+        let candidate = PathBuf::from(jh).join("bin").join(exe);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    // 2. System PATH check
+    let check_cmd = if cfg!(windows) { "where.exe" } else { "which" };
+    if let Ok(output) = Command::new(check_cmd).arg("java").output() {
+        if output.status.success() {
+            let first_line = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if !first_line.is_empty() {
+                return Some(PathBuf::from(first_line));
+            }
+        }
+    }
+
+    // 3. Search PATH entries directly
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let exe = if cfg!(windows) { "java.exe" } else { "java" };
+            let candidate = dir.join(exe);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // 4. Standard Windows JDK/JRE locations (JetBrains JBR, Eclipse Adoptium, Oracle)
+    if cfg!(windows) {
+        let candidates = [
+            r"C:\Program Files\JetBrains\IntelliJ IDEA 2026.2.3\jbr\bin\java.exe",
+            r"C:\Program Files\JetBrains\IntelliJ IDEA\jbr\bin\java.exe",
+            r"C:\Program Files\Eclipse Adoptium\jdk-25-hotspot\bin\java.exe",
+            r"C:\Program Files\Eclipse Adoptium\jdk-21-hotspot\bin\java.exe",
+            r"C:\Program Files\Java\jdk-25\bin\java.exe",
+            r"C:\Program Files\Java\jdk-21\bin\java.exe",
+            r"C:\Program Files\Java\jdk-17\bin\java.exe",
+        ];
+        for c in &candidates {
+            let p = PathBuf::from(c);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    // 5. Standard Linux paths
+    if !cfg!(windows) {
+        let candidates = [
+            "/home/xagi/.sdkman/candidates/java/current/bin/java",
+            "/usr/lib/jvm/default-java/bin/java",
+            "/usr/bin/java",
+        ];
+        for c in &candidates {
+            let p = PathBuf::from(c);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    None
+}
+
+fn handle_io_error(err: &std::io::Error, path: &std::path::Path) {
+    if err.raw_os_error() == Some(112) || err.kind() == std::io::ErrorKind::StorageFull {
+        eprintln!("❌ [E0112] Storage Full: Not enough space on the disk to write {}", path.display());
+        eprintln!("\nExplanation: The destination drive or temporary directory has run out of free disk space.");
+        eprintln!("Actionable Fix:");
+        eprintln!("  1. Free up disk space on the target drive (e.g. drive C:).");
+        eprintln!("  2. Clear temporary files in %TEMP% or /tmp.");
+    } else {
+        eprintln!("❌ [E0010] I/O Error writing {}: {}", path.display(), err);
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -240,7 +332,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (main_class, jar_bytes) = match compile_to_jar(&ast, file_name) {
                 Ok(res) => res,
                 Err(err) => {
-                    eprintln!("codegen error: {}", err);
+                    eprintln!("❌ [E0020] Codegen error: {}", err);
                     process::exit(1);
                 }
             };
@@ -250,7 +342,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 PathBuf::from(format!("{}.jar", stem))
             });
 
-            fs::write(&out_path, jar_bytes)?;
+            if let Err(err) = fs::write(&out_path, jar_bytes) {
+                handle_io_error(&err, &out_path);
+                process::exit(1);
+            }
+
             println!("✓ Successfully compiled {} into runnable JAR: {}", file.display(), out_path.display());
             println!("  Main Class: {}", main_class.replace('/', "."));
             println!("  Run with:   java -jar {}", out_path.display());
@@ -305,12 +401,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("  Run with:    {}", bin.display());
                 }
                 Err(err) => {
-                    eprintln!("❌ Native compilation error: {}", err);
+                    eprintln!("❌ Native compilation error:\n{}", err);
                     process::exit(1);
                 }
             }
         }
-        Commands::Run { file, jvm } => {
+        Commands::Run { file, output, jvm, native } => {
             let content = fs::read_to_string(&file)?;
             let file_str = file.to_string_lossy();
             let file_name = file.file_name().unwrap().to_str().unwrap();
@@ -334,48 +430,86 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            if jvm {
-                let (_, jar_bytes) = match compile_to_jar(&ast, file_name) {
-                    Ok(res) => res,
-                    Err(err) => {
-                        eprintln!("codegen error: {}", err);
-                        process::exit(1);
-                    }
-                };
+            // Intelligent target resolution:
+            // 1. If --native is explicitly requested: must use native (fails if Zig is missing)
+            // 2. If --jvm is explicitly requested: must use JVM
+            // 3. Default: auto-detect! If Zig is installed, use ultra-fast native;
+            //    otherwise, seamlessly fall back to JVM mode!
+            let use_native = if native {
+                true
+            } else if jvm {
+                false
+            } else {
+                is_zig_available()
+            };
 
-                let temp_jar = std::env::temp_dir().join(format!("{}_{}.jar", stem, process::id()));
-                fs::write(&temp_jar, jar_bytes)?;
+            if use_native {
+                let target_bin = output.clone().unwrap_or_else(|| {
+                    let exe_ext = if cfg!(windows) { ".exe" } else { "" };
+                    std::env::temp_dir().join(format!("{}_{}_bin{}", stem, process::id(), exe_ext))
+                });
 
-                let status = Command::new("java")
-                    .arg("-jar")
-                    .arg(&temp_jar)
-                    .status();
+                if let Err(err) = compile_to_native(&ast, &target_bin) {
+                    eprintln!("❌ Native compilation error:\n{}", err);
+                    process::exit(1);
+                }
 
-                let _ = fs::remove_file(&temp_jar);
+                let status = Command::new(&target_bin).status();
+                if output.is_none() {
+                    let _ = fs::remove_file(&target_bin);
+                }
 
                 match status {
                     Ok(s) if s.success() => {}
                     Ok(s) => process::exit(s.code().unwrap_or(1)),
                     Err(err) => {
-                        eprintln!("Failed to execute Java: {}", err);
+                        eprintln!("❌ [E0004] Failed to execute native binary: {}", err);
                         process::exit(1);
                     }
                 }
             } else {
-                let temp_bin = std::env::temp_dir().join(format!("{}_{}_bin", stem, process::id()));
-                if let Err(err) = compile_to_native(&ast, &temp_bin) {
-                    eprintln!("❌ Native compilation error: {}", err);
+                let (_, jar_bytes) = match compile_to_jar(&ast, file_name) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        eprintln!("❌ [E0020] Codegen error: {}", err);
+                        process::exit(1);
+                    }
+                };
+
+                let target_jar = output.clone().unwrap_or_else(|| {
+                    std::env::temp_dir().join(format!("{}_{}.jar", stem, process::id()))
+                });
+
+                if let Err(err) = fs::write(&target_jar, jar_bytes) {
+                    handle_io_error(&err, &target_jar);
                     process::exit(1);
                 }
 
-                let status = Command::new(&temp_bin).status();
-                let _ = fs::remove_file(&temp_bin);
+                let java_exe = find_java();
+                let java_cmd = match &java_exe {
+                    Some(p) => p.as_os_str(),
+                    None => std::ffi::OsStr::new(if cfg!(windows) { "java.exe" } else { "java" }),
+                };
+
+                let status = Command::new(java_cmd)
+                    .arg("-jar")
+                    .arg(&target_jar)
+                    .status();
+
+                if output.is_none() {
+                    let _ = fs::remove_file(&target_jar);
+                }
 
                 match status {
                     Ok(s) if s.success() => {}
                     Ok(s) => process::exit(s.code().unwrap_or(1)),
                     Err(err) => {
-                        eprintln!("Failed to execute native binary: {}", err);
+                        eprintln!("❌ [E0002] Java Runtime Environment (JRE) Not Found: {}", err);
+                        eprintln!("\nExplanation: 'k3 run' in JVM mode requires a Java Virtual Machine (Java 8–25) to execute .jar files.");
+                        eprintln!("Actionable Fix:");
+                        eprintln!("  1. Install OpenJDK (e.g. 'winget install Microsoft.OpenJDK.21' or adoptium.net).");
+                        eprintln!("  2. Or set JAVA_HOME pointing to your JDK directory.");
+                        eprintln!("  3. Or install Zig ('winget install zig.zig') to compile directly to standalone native machine code without needing Java!");
                         process::exit(1);
                     }
                 }

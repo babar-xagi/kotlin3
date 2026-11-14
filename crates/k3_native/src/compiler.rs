@@ -13,7 +13,7 @@ pub enum NativeError {
     Codegen(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Zig compiler not found. Please install Zig 0.17+ or set ZIG_EXE environment variable.")]
+    #[error("[E0001] Zig Native Compiler Not Found\n\nExplanation: 'k3 native' compiles Kotlin directly into standalone native machine-code executables using Zig's zero-dependency linker.\n\nTo run or compile without Zig:\n  -> Use 'k3 build <file.kt>' to generate standard runnable JARs (zero dependencies!).\n  -> Use 'k3 run <file.kt>' which automatically uses JVM mode when Zig is not present.\n\nTo install Zig for native compilation:\n  -> Windows: winget install zig.zig  (or download from https://ziglang.org/download/)\n  -> Linux:   sudo apt install zig    (or download from https://ziglang.org/download/)")]
     ZigNotFound,
     #[error("Zig compilation failed (exit code {status:?}):\n{stderr}")]
     CompilationFailed {
@@ -32,7 +32,7 @@ impl NativeCompiler {
         Ok(Self { zig_path })
     }
 
-    fn find_zig() -> Result<PathBuf, NativeError> {
+    pub fn find_zig() -> Result<PathBuf, NativeError> {
         // 1. Explicit environment variable
         if let Ok(p) = std::env::var("ZIG_EXE").or_else(|_| std::env::var("ZIG_PATH")) {
             let pb = PathBuf::from(p);
@@ -41,18 +41,49 @@ impl NativeCompiler {
             }
         }
 
-        // 2. Standard location in WSL environment
+        // 2. Standard location in WSL / Linux
         let opt_zig = PathBuf::from("/opt/zig/zig");
         if opt_zig.exists() {
             return Ok(opt_zig);
         }
 
-        // 3. System PATH check
-        if let Ok(output) = Command::new("which").arg("zig").output() {
+        // 3. Standard Windows locations
+        if cfg!(windows) {
+            let win_paths = [
+                r"C:\zig\zig.exe",
+                r"C:\Program Files\zig\zig.exe",
+            ];
+            for p in &win_paths {
+                let pb = PathBuf::from(p);
+                if pb.exists() {
+                    return Ok(pb);
+                }
+            }
+        }
+
+        // 4. System PATH check (Windows where.exe or Unix which)
+        let check_cmd = if cfg!(windows) { "where.exe" } else { "which" };
+        if let Ok(output) = Command::new(check_cmd).arg("zig").output() {
             if output.status.success() {
-                let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path_str.is_empty() {
-                    return Ok(PathBuf::from(path_str));
+                let first_line = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !first_line.is_empty() {
+                    return Ok(PathBuf::from(first_line));
+                }
+            }
+        }
+
+        // 5. Check PATH environment variable directly
+        if let Some(path_var) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&path_var) {
+                let exe_name = if cfg!(windows) { "zig.exe" } else { "zig" };
+                let candidate = dir.join(exe_name);
+                if candidate.exists() {
+                    return Ok(candidate);
                 }
             }
         }
@@ -119,4 +150,9 @@ impl NativeCompiler {
 pub fn compile_to_native(ast: &KtFile, output_binary: &Path) -> Result<PathBuf, NativeError> {
     let compiler = NativeCompiler::new()?;
     compiler.compile(ast, output_binary)
+}
+
+/// Check if Zig compiler is available on the current system
+pub fn is_zig_available() -> bool {
+    NativeCompiler::find_zig().is_ok()
 }

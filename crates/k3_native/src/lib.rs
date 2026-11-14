@@ -2,7 +2,7 @@ pub mod codegen;
 pub mod compiler;
 
 pub use codegen::NativeCodegen;
-pub use compiler::{compile_to_native, NativeCompiler, NativeError, RUNTIME_ZIG};
+pub use compiler::{compile_to_native, is_zig_available, NativeCompiler, NativeError, RUNTIME_ZIG};
 
 #[cfg(test)]
 mod tests {
