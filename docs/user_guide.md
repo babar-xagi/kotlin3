@@ -44,6 +44,19 @@ Kotlin3 (`k3`) solves the longstanding cold startup and resource consumption cha
 * **Zig**: `0.17+` (pre-installed at `/opt/zig/zig` or added to system `PATH`).
 * **Java (Optional for JVM target)**: OpenJDK 8, 11, 17, 21, or 25.
 
+### Pre-Built Packages & Installers (Recommended)
+
+Official releases can be downloaded directly from [GitHub Releases](https://github.com/babar-xagi/kotlin3/releases/tag/v0.6.0):
+
+* **Windows x64 (.msi)**: [**`kotlin3-v0.6.0-windows-x64.msi`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.msi)
+  * Double-click to install or run `msiexec /i kotlin3-v0.6.0-windows-x64.msi /quiet`. Automatically adds `k3.exe` to system `PATH`.
+* **Windows x64 (.zip)**: [**`kotlin3-v0.6.0-windows-x64.zip`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.zip)
+  * Portable binary archive containing `k3.exe`.
+* **Linux Debian/Ubuntu (.deb)**: [**`kotlin3_0.6.0_amd64.deb`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3_0.6.0_amd64.deb)
+  * Install via `sudo dpkg -i kotlin3_0.6.0_amd64.deb`.
+* **Linux x86_64 (.tar.gz)**: [**`kotlin3-v0.6.0-linux-x86_64.tar.gz`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-linux-x86_64.tar.gz)
+  * Extract and copy `k3` to `/usr/local/bin/`.
+
 ### Building from Source
 
 ```bash

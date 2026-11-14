@@ -31,6 +31,43 @@
 
 ---
 
+## 💾 Downloads & Official Installers
+
+Pre-built binaries and official installers for **Kotlin3 v0.6.0** are available directly from [GitHub Releases](https://github.com/babar-xagi/kotlin3/releases/tag/v0.6.0):
+
+| Platform | Format | Direct Download | Description |
+| :--- | :---: | :--- | :--- |
+| **Windows (x64)** | 📦 **MSI Installer** | [**`kotlin3-v0.6.0-windows-x64.msi`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.msi) | Full Windows installer (auto-configures `PATH`) |
+| **Windows (x64)** | 🗜️ Portable ZIP | [**`kotlin3-v0.6.0-windows-x64.zip`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.zip) | Standalone portable executable (`k3.exe`) |
+| **Linux (Debian / Ubuntu)** | 📦 **DEB Package** | [**`kotlin3_0.6.0_amd64.deb`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3_0.6.0_amd64.deb) | Native Debian package for Ubuntu / Debian |
+| **Linux (x86_64)** | 🗜️ Tarball | [**`kotlin3-v0.6.0-linux-x86_64.tar.gz`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-linux-x86_64.tar.gz) | Standalone binary archive (`k3`) |
+
+### 🪟 Windows Setup (MSI)
+1. Download [**`kotlin3-v0.6.0-windows-x64.msi`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.msi).
+2. Double-click the `.msi` file to install to `C:\Program Files\Kotlin3\bin\k3.exe` (or run silently: `msiexec /i kotlin3-v0.6.0-windows-x64.msi /quiet`).
+3. Open PowerShell or Command Prompt and test:
+   ```powershell
+   k3 --version
+   # Output: k3 0.6.0
+   ```
+
+### 🐧 Linux Setup (DEB / Tarball)
+```bash
+# Option 1: Install via DEB package on Ubuntu / Debian
+curl -LO https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3_0.6.0_amd64.deb
+sudo dpkg -i kotlin3_0.6.0_amd64.deb
+
+# Option 2: Extract standalone tarball
+curl -LO https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-linux-x86_64.tar.gz
+tar -xzf kotlin3-v0.6.0-linux-x86_64.tar.gz
+sudo mv k3 /usr/local/bin/
+
+k3 --version
+# Output: k3 0.6.0
+```
+
+---
+
 ## 🏎️ Performance at a Glance
 
 Live verified comparison between **JetBrains Kotlin K2 (`kotlinc-jvm 2.4.21` on OpenJDK 25)** and **Kotlin3 (`k3 0.6.0`)** compiling to JVM JARs and standalone native executables:

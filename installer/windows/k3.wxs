@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Kotlin3 (k3) Compiler"
+           Language="1033"
+           Version="0.6.0.0"
+           Manufacturer="Kotlin3 Project"
+           UpgradeCode="4E8A6E24-2C8B-4B7E-9730-9A74E51FE0B3">
+    <Package InstallerVersion="200"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Comments="Kotlin3 (k3) - Ultra-fast Kotlin Compiler in Rust and Zig" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Kotlin3">
+          <Directory Id="BinFolder" Name="bin">
+            <Component Id="K3Executable" Guid="A3B5C7D9-E1F2-43A5-8B6C-7D8E9F0A1B2C" Win64="yes">
+              <File Id="K3Exe" Source="target/x86_64-pc-windows-gnu/release/k3.exe" KeyPath="yes" />
+              <Environment Id="PATH" Name="PATH" Value="[BinFolder]" Permanent="no" Part="last" Action="set" System="yes" />
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="ProductFeature" Title="Kotlin3 Compiler" Level="1">
+      <ComponentRef Id="K3Executable" />
+    </Feature>
+  </Product>
+</Wix>
