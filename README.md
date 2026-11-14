@@ -99,6 +99,7 @@ kotlin3/
 │   ├── 04_lambdas_and_collections/# Generics & higher-order functions
 │   └── 05_coroutines/            # Suspend functions & coroutine signatures
 ├── docs/                         # In-depth architectural & user documentation
+│   ├── user_guide.md             # Comprehensive User Guide & Step-by-Step Tutorials
 │   ├── architecture.md           # Deep dive into system layers
 │   ├── toolchain.md              # CLI manual and target compilation
 │   ├── compatibility.md          # Kotlin 2.x K2 specification parity
@@ -113,6 +114,8 @@ kotlin3/
 ---
 
 ## 🛠️ Getting Started
+
+> 📖 New to Kotlin3? Read the **[Comprehensive User Guide & Tutorials](docs/user_guide.md)** for step-by-step walkthroughs, examples, and CLI flags.
 
 ### Prerequisites
 * **Rust**: `1.100+` (`rustup update`)

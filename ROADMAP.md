@@ -1,280 +1,308 @@
-# 🗺️ Kotlin3 (k3) Project Roadmap
+# 🗺️ Kotlin3 (k3) Master Engineering Roadmap: 62-Phase Plan
 
-Welcome to the **Kotlin3** engineering roadmap! This document charts our journey toward creating an ultra-fast, independent Kotlin compiler and self-contained toolchain engineered in **Rust** and **Zig**, culminating in **Kotlin self-hosting**.
-
----
-
-## 🎯 North Star Goals
-
-- ⚡ **10x–50x Build Acceleration**: Sub-second cold compilation without JVM warmup, heavy memory allocations, or Gradle daemon overhead.
-- 📦 **Zero-Dependency Self-Contained Toolchain**: Single unified executable (`k3`) handling compilation, execution, testing, dependency resolution, and cross-compilation.
-- 🛡️ **100% Kotlin 2.x Compatibility**: Drop-in language conformance with Kotlin K2 specification, standard `.class` bytecodes, `@kotlin.Metadata`, and `.klib` packages.
-- 🌐 **Native & Multiplatform First**: Zero-JVM native binaries via Zig's minimal runtime alongside standard JVM bytecode generation for Android and server backends.
+Welcome to the **Kotlin3** engineering master roadmap. This document charts the complete architectural trajectory for rewriting and expanding the Kotlin toolchain in **Rust** and **Zig**, systematically testing against all existing libraries, frameworks, platforms, and real-world codebases to catch and fix every error, culminating in **full Kotlin self-hosting**.
 
 ---
 
-## 🏛️ High-Level System Architecture
+## 🎯 North Star Objectives
+
+- ⚡ **10x–50x Cold Compilation Speedup**: Sub-millisecond frontend analysis and in-memory code generation without JVM startup or Gradle daemon overhead.
+- 🚀 **Sub-Millisecond Native Execution**: Standalone, statically linkable machine-code executables starting in `< 1 ms` with footprint `< 1 MB`.
+- 📦 **Zero-Dependency Unified Toolchain**: A single self-contained `k3` executable handling compilation, testing, execution, dependency management, and multiplatform packaging.
+- 🛡️ **100% Kotlin 2.x K2 Conformance**: Drop-in language conformance with official JetBrains K2 specifications, standard `.class` bytecodes, and `.klib` packages.
+- 🧪 **Exhaustive Real-World Framework Compatibility**: Validated against real-world frameworks (Coroutines, Ktor, Serialization, Spring Boot, Compose, Exposed, Koin, Arrow, Android Jetpack).
+- 🔄 **Full Self-Hosting Milestone**: Kotlin3 compiles its own standard library, frontend, backend, and driver in Kotlin.
+
+---
+
+## 🏛️ Comprehensive Architecture
 
 ```mermaid
 flowchart TD
-    subgraph ToolchainDriver ["🚀 Unified Toolchain & Driver (Zig)"]
-        CLI["k3 CLI (build, run, test, check, repl)"]
-        ZigBuild["build.zig Toolchain Orchestrator"]
-        NativeRT["Minimal Native Runtime (< 2MB, Arena + Tracing GC)"]
-        CInterop["Zig C-Interop & Cross-Compiler (@cImport / LibClang)"]
+    subgraph Frontend ["🦀 Rust Frontend & Analysis Engine"]
+        SIMD["SIMD Zero-Copy Lexer (k3_syntax)"]
+        Parser["Pratt Parser & CST AST (k3_syntax)"]
+        FIR["K2 Phased Semantic Engine (k3_fir)"]
+        Cone["Cone Type System & PCLA Solver (k3_fir)"]
+        DFA["Data-Flow Analysis & Smart Casts (k3_fir)"]
     end
 
-    subgraph RustFrontend ["🦀 Frontend & Semantic Analysis (Rust)"]
-        Lexer["Zero-Copy Lexer (SIMD / Logos)"]
-        Parser["Resilient Pratt Parser & CST/LightTree"]
-        FIR["K2 Frontend IR (Strict Phased Pipeline)"]
-        ConeTypes["Cone Type System & Constraint Solver (PCLA)"]
-        DFA["Data-Flow Analysis & Smart Cast Engine"]
-        Diagnostics["Diagnostic Engine & Code Checkers"]
+    subgraph IRStage ["⚙️ Target-Decoupled Backend IR"]
+        FIR2IR["FIR to IR Translator (k3_ir)"]
+        CommonIR["Universal Backend IR (k3_ir)"]
+        Lowerings["Composable Lowerings (CPS, Inlining, Stubs, Value Classes)"]
     end
 
-    subgraph IRStage ["⚙️ Backend IR & Lowerings (Rust)"]
-        FIR2IR["FIR to IR Lowering Coordinator"]
-        CommonIR["Universal Backend IR"]
-        Lowerings["Composable Lowerings\n(Coroutines CPS, Lambdas, Inlining, Default Args)"]
-    end
-
-    subgraph Backends ["🎯 Target Code Generation"]
+    subgraph Targets ["🎯 Multiplatform Target Backends"]
         direction TB
-        subgraph JVM ["☕ JVM Backend (Rust)"]
-            JVMGen["ASM-style JVM Bytecode Writer"]
-            ClassOut["Valid .class / .jar (Java 8 - 25)"]
-            MetaOut["@kotlin.Metadata Protobuf Annotations"]
+        subgraph JVMTarget ["☕ JVM Backend (k3_jvm)"]
+            Bytecode["ASM-Style Classfile Writer"]
+            JARPacker["Zero-Dependency ZIP/JAR Archiver"]
         end
-        subgraph Native ["⚡ Native Backend (Zig / LLVM)"]
-            NativeGen["Machine Code Generator / LLVM IR"]
-            NativeBin["Native Binaries (Linux, macOS, Windows)"]
+        subgraph NativeTarget ["⚡ Native Backend (k3_native)"]
+            NativeGen["AST & IR to Zig Generator"]
+            ZigCompiler["Zig 0.17 Compiler (ReleaseFast)"]
+            EmbeddedRT["Embedded Native Runtime (< 1 MB)"]
         end
-        subgraph Multiplatform ["📦 KLib & Web Backends"]
-            KLibWriter["KLib Serializer (IR + Protobuf Metadata)"]
-            WasmGen["Wasm GC & WASI Generator"]
+        subgraph MultiplatformTarget ["📦 Multiplatform Backends"]
+            KLib["KLib Serialization (.knm + .ir)"]
+            Wasm["WebAssembly / WASI Backend"]
+            JS["ES2022 / Node.js Backend"]
         end
     end
 
-    CLI --> Lexer
-    Lexer --> Parser --> FIR --> ConeTypes --> DFA --> Diagnostics
-    ConeTypes --> FIR2IR --> CommonIR --> Lowerings
-    Lowerings --> JVMGen --> ClassOut
-    JVMGen --> MetaOut
-    Lowerings --> NativeGen --> NativeBin
-    NativeBin -.-> NativeRT
-    Lowerings --> KLibWriter
-    Lowerings --> WasmGen
-    ZigBuild --> CLI
-    CInterop --> NativeGen
+    SIMD --> Parser --> FIR --> Cone --> DFA --> FIR2IR --> CommonIR --> Lowerings
+    Lowerings --> Bytecode --> JARPacker
+    Lowerings --> NativeGen --> ZigCompiler
+    EmbeddedRT -.-> ZigCompiler
+    Lowerings --> KLib
+    Lowerings --> Wasm
+    Lowerings --> JS
 ```
 
 ---
 
-## 📅 Roadmap Overview & Progress Matrix
+## 📅 Roadmap Overview & Progress Matrix (Phases 1 – 62)
 
-| Milestone | Phase Focus | Key Deliverables | Status | Target |
-| :--- | :--- | :--- | :---: | :--- |
-| **v0.1.0** | 🏗️ **Scaffolding & Core Foundations** | Multi-crate Rust workspace, SIMD Lexer, K2 FIR skeleton, Zig driver | 🟢 **Completed** | Q4 2026 |
-| **v0.2.0** | 📜 **Syntax Parser & AST Construction** | Full Pratt Expression Parser, Declarations AST, LightTree parser | 🟢 **Completed** | Q4 2026 |
-| **v0.3.0** | 🧠 **K2 FIR & Cone Type Resolution** | Phased symbol resolution, Cone types, Type inference (PCLA), DFA smart casts | 🟢 **Completed** | Q4 2026 |
-| **v0.4.0** | ☕ **JVM Bytecode Generation** | Classfile binary emission, StackMapTable calculation, `@kotlin.Metadata` | 🟢 **Completed** | Q1 2027 |
-| **v0.5.0** | ⚙️ **Backend IR & Lowerings** | Coroutine state machines, lambda metafactories, default arguments | 🟢 **Completed** | Q2 2027 |
-| **v0.6.0** | ⚡ **Zig Native Runtime & Code Gen** | Lightweight runtime, arena memory manager, Native ELF/Mach-O/PE output | 🟢 **Completed** | Q3 2027 |
-| **v0.7.0** | 📦 **KLib & Dependency Ecosystem** | Protobuf metadata reader/writer, `.klib` support, Maven Central JAR ingestion | 🟡 **In Progress** | Q4 2027 |
-| **v1.0.0** | 🏆 **Self-Hosting & Production Release** | Kotlin3 compiles itself, 100% JetBrains `testData` conformance passed | ⚪ Planned | Q1 2028 |
-
----
-
-## 🔬 Detailed Phase Breakdown
-
-### Phase 1: Foundations & High-Speed Lexing (v0.1.0) — *Current*
-- [x] 🦀 Setup root Cargo workspace (`k3_syntax`, `k3_fir`, `k3_ir`, `k3_jvm`, `k3_cli`).
-- [x] ⚡ Implement high-performance zero-copy Kotlin Lexer with Logos and SIMD tokenization.
-- [x] 🧩 Define complete Kotlin 2.x token set (Hard keywords, Soft modifiers, Operators, Literals).
-- [x] 📐 Build source span management (`Span`, byte offsets).
-- [x] 🦎 Setup Zig master build coordinator (`build.zig`) and `runtime/src/main.zig` toolchain driver.
-- [x] 🖥️ Build `k3` CLI with `lex` and `check` commands.
-- [x] 🧪 Verify compilation and unit tests on WSL (Rust 1.100, Zig 0.17.1).
+| Milestone | Phase Range | Focus Domain | Key Frameworks & Deliverables | Status | Target |
+| :--- | :---: | :--- | :--- | :---: | :--- |
+| **Milestone 1** | **Phases 1–6** | 🏗️ **Core Compiler Foundations** | SIMD Lexer, Pratt Parser, FIR, JVM JAR, Universal IR, Zig Native | 🟢 **Completed** | v0.1.0 – v0.6.0 |
+| **Milestone 2** | **Phases 7–12** | 📚 **Standard Library & Builtins** | Primitives, UTF-8 Strings, Arrays, Core Collections, Sequences, Null-Safety | 🟡 **Active** | v0.7.0 – v0.8.2 |
+| **Milestone 3** | **Phases 13–18** | 🏛️ **Advanced Language Semantics** | Operators, Delegation, Value Classes, Sealed Types, Generics, Reflection | ⚪ Planned | v0.9.0 – v0.9.5 |
+| **Milestone 4** | **Phases 19–24** | 🌀 **Coroutines & Reactive Flows** | `kotlinx.coroutines`, Structured Concurrency, Dispatchers, Channels, Flow | ⚪ Planned | v0.10.0 – v0.11.2 |
+| **Milestone 5** | **Phases 25–29** | 📦 **Serialization & Data Formats** | `kotlinx.serialization`, JSON, Protobuf, `kotlinx-datetime`, Immutable | ⚪ Planned | v0.12.0 – v0.13.1 |
+| **Milestone 6** | **Phases 30–35** | 🌐 **IO, Networking & Web Frameworks**| `kotlinx-io`, Ktor Client/Server, OkHttp, Retrofit, Javalin, Spring Boot 3 | ⚪ Planned | v0.14.0 – v0.15.2 |
+| **Milestone 7** | **Phases 36–40** | 🗄️ **Databases & ORM Frameworks** | Exposed ORM, SQLDelight, Ktorm, Android Room, NoSQL / Key-Value | ⚪ Planned | v0.16.0 – v0.16.4 |
+| **Milestone 8** | **Phases 41–44** | 💉 **Dependency Injection & KSP** | Koin, Dagger/Anvil, Kodein, Kotlin Symbol Processing (KSP) protocol | ⚪ Planned | v0.17.0 – v0.17.3 |
+| **Milestone 9** | **Phases 45–49** | 📱 **Jetpack, UI & Compose KMP** | Android Lifecycle, Compose Multiplatform plugin, Desktop, Web, iOS | ⚪ Planned | v0.18.0 – v0.18.4 |
+| **Milestone 10**| **Phases 50–54** | 🌍 **Multiplatform & Cross-Targets**| KLib format, Apple Darwin (Mach-O), Windows (PE/COFF), WASI, JS | ⚪ Planned | v0.19.0 – v0.19.4 |
+| **Milestone 11**| **Phases 55–58** | 🧪 **Static Analysis & Test Suites** | Arrow, Detekt, KtLint, MockK, JetBrains official `testData` suite | ⚪ Planned | v0.20.0 – v0.20.3 |
+| **Milestone 12**| **Phases 59–62** | 🏆 **Package Manager & Self-Hosting**| Maven Central, `k3 add`, Generational GC, Full Self-Hosting Cycle | ⚪ Planned | v0.21.0 – v1.0.0 |
 
 ---
 
-### Phase 2: Complete Kotlin Syntax Parser & CST (v0.2.0) — *Completed*
-```mermaid
-flowchart LR
-    Tokens["Token Stream"] --> Pratt["Pratt Expression Parser"]
-    Tokens --> DeclParser["Declaration Parser"]
-    Pratt --> AST["Syntax AST / LightTree"]
-    DeclParser --> AST
-    AST --> Errors["Resilient Error Recovery"]
-```
-- [x] 📜 **Pratt Expression Parser**:
-  - Full precedence climbing for Kotlin operator table (`+`, `-`, `*`, `/`, `%`, `==`, `===`, `?:`, `?.`, `as`, `is`, `in`, `..`, `..<`).
-  - Safe call chains (`a?.b?.c()`), elvis expressions (`a ?: b`), and not-null assertions (`x!!`).
-  - Lambda expressions, trailing lambdas (`items.map { it.name }`), and generic calls (`mutableListOf<T>()`).
-- [x] 🏛️ **Declaration Parsers**:
-  - Functions: `fun <T> List<T>.name(params): ReturnType { ... }` with extension receivers and type parameters.
-  - Classes, interfaces, sealed hierarchies, data classes, inline/value classes.
-  - Properties with initializers and type annotations (`val name: Type = expr`).
-- [x] 🛡️ **Error-Tolerant AST**:
-  - AST with accurate source `Span` tracking across all declaration and expression nodes.
-  - Added `k3 parse <file.kt>` command to `k3_cli`.
+## 🔬 Master 62-Phase Deep-Dive Breakdown
+
+### Milestone 1: Core Compiler Foundations & Dual Backends (v0.1.0 – v0.6.0) — *Completed*
+- [x] **Phase 1: Toolchain Scaffolding & Zero-Copy SIMD Lexer (v0.1.0)**: Multi-crate Cargo workspace, Logos SIMD tokenization, Zig master driver (`build.zig`).
+- [x] **Phase 2: Complete Pratt Parser & Declarations AST (v0.2.0)**: Operator precedence climbing, safe call chains, declarations, error recovery, `k3 parse`.
+- [x] **Phase 3: K2 FIR Phased Semantic Engine & Cone Types (v0.3.0)**: Phased resolution, Cone types subtyping, DFA smart casts, structured diagnostics.
+- [x] **Phase 4: JVM Bytecode & Runnable JAR Emitter (v0.4.0)**: Pure binary classfile generator, jump offset patching, in-memory ZIP archiver, `k3 build`.
+- [x] **Phase 5: Universal Backend IR & Composable Lowerings (v0.5.0)**: Universal IR tree, CPS coroutine lowerings, default argument stubs, inline passes, `k3 ir`.
+- [x] **Phase 6: Zig Native Runtime & Multiplatform Codegen (v0.6.0)**: Zero-dependency Zig runtime, direct OS syscall writes, `< 1 MB` native binaries, sub-millisecond execution, `k3 native`, `k3 run`.
 
 ---
 
-### Phase 3: K2 FIR Phased Semantic Engine (v0.3.0) — *Completed*
-```mermaid
-flowchart TD
-    Raw["Raw FIR"] --> Imports["Imports Phase"]
-    Imports --> SuperTypes["SuperTypes Resolution"]
-    SuperTypes --> Types["Signatures & Types"]
-    Types --> Status["Visibility & Modality"]
-    Status --> Contracts["Function Contracts"]
-    Contracts --> Implicit["Implicit Return Types"]
-    Implicit --> Body["Body Resolve & PCLA Inference"]
-    Body --> DFA["Data-Flow Analysis & Smart Casts"]
-    DFA --> Checkers["Diagnostic Checkers"]
-```
-- [x] 🌲 **Phased Resolution Invariants**:
-  - Implemented top-level declaration indexing, header typing, local body resolution, and diagnostic reporting.
-- [x] 🧬 **Cone Type System**:
-  - `ConeClassLikeType`, `ConeTypeParameterType`, `ConeFlexibleType`, and `ConeIntersectionType` with full subtyping rules.
-- [x] 🔍 **Symbol Table & Scopes**:
-  - Delegating lexical, class member, file, and built-in root scopes (`k3_fir/src/symbols.rs`).
-- [x] 🌊 **Data-Flow Analysis (DFA)**:
-  - Smart-casting tracking across branching paths (`if` and `when`).
-- [x] 🛡️ **Diagnostic Engine**:
-  - Formatted terminal diagnostics with line/column/caret positioning and severity codes.
+### Milestone 2: Standard Library & Core Kotlin Builtins (v0.7.0 – v0.8.2) — *Active*
+- [ ] **Phase 7: Standard Primitives, Ranges & Math Runtime (v0.7.0)**:
+  - Full numeric promotion, unsigned types (`UByte`, `UShort`, `UInt`, `ULong`).
+  - Range progressions (`IntProgression`, `LongProgression`, `downTo`, `step`).
+  - Intrinsics for `kotlin.math` (`sin`, `cos`, `sqrt`, `hypot`, `pow`, bitwise bit-counting).
+  - Test suite: Primitives & range verification against official K2 stdlib.
+- [ ] **Phase 8: UTF-8 String Engine, Char Operations & Regex (v0.7.1)**:
+  - Fast zero-allocation `String` slices, `StringBuilder` capacity scaling.
+  - Case mapping (`lowercase`, `uppercase`), whitespace trimming, character encodings.
+  - High-speed Regex engine compiled directly to Zig/PCRE matcher without JVM overhead.
+  - Test suite: Text processing benchmarks and UTF-8 conformance.
+- [ ] **Phase 9: Zero-Boxing Primitive & Object Arrays (v0.7.2)**:
+  - Primitive specialized arrays (`IntArray`, `LongArray`, `DoubleArray`, `BooleanArray`).
+  - Generic `Array<T>` with covariant projection and array-copy intrinsics (`System.arraycopy`).
+  - Memory bounds verification and bounds-check elimination (BCE) in IR.
+  - Test suite: 10,000,000 element array transformation benchmarks.
+- [ ] **Phase 10: Kotlin Core Collections Hierarchy (v0.8.0)**:
+  - Full implementation of `Iterable<T>`, `Collection<T>`, `List<T>`, `Set<T>`, `Map<K, V>`.
+  - Mutable collection variants (`MutableList`, `MutableSet`, `MutableMap`, `ArrayList`, `LinkedHashMap`).
+  - Immutable view wrappers and structural equality semantics (`contentEquals`, `equals`).
+  - Test suite: Conformance tests against Kotlin stdlib collections test suite.
+- [ ] **Phase 11: Lazy Evaluation & High-Performance Sequences (v0.8.1)**:
+  - `Sequence<T>`, `asSequence()`, lazy chaining (`map`, `filter`, `take`, `drop`, `distinct`).
+  - Generator yields via `sequence { yield(x); yieldAll(list) }` continuation suspension.
+  - Memory footprint benchmarks vs eager collection operations.
+- [ ] **Phase 12: Null-Safety System & Platform Types (v0.8.2)**:
+  - Elvis operator (`?:`), safe navigation call chains (`a?.b?.c()`), not-null assertion (`!!`).
+  - Platform types (`T!`) resolution for external Java library boundaries.
+  - Smart nullability narrowing across complex boolean conditions (`if (x != null && x.isValid())`).
 
 ---
 
-### Phase 4: JVM Bytecode & Binary Classfile Emitter (v0.4.0) — *Completed*
-```mermaid
-flowchart TD
-    AST["AST / FIR"] --> CodeGen["JVM Codegen Engine"]
-    CodeGen --> ClassWriter["Binary ClassFile Writer"]
-    CodeGen --> CP["Constant Pool Indexer"]
-    CodeGen --> Insns["Bytecode Instructions (OpCodes)"]
-    ClassWriter --> JarPacker["Zero-Dependency ZIP/JAR Packager"]
-    JarPacker --> OutJar["Runnable .jar Archive"]
-```
-- [x] ☕ **Classfile Generation**:
-  - Full binary classfile writer (`0xCAFEBABE`, minor/major versions, constant pool, interfaces, fields, methods, code attributes).
-  - Universal bytecode baseline targeting Java 5/6 through Java 25.
-  - Automated constant pool deduplication (`Utf8`, `Class`, `String`, `Fieldref`, `Methodref`, `InterfaceMethodref`, `NameAndType`).
-- [x] 🔀 **Control Flow & Instruction Generation**:
-  - Full instruction set: constants (`iconst`, `bipush`, `sipush`, `ldc`), loads/stores (`iload`, `aload`, `istore`, `astore`), arithmetic (`iadd`, `isub`, `imul`, `idiv`, `irem`), invocations (`invokevirtual`, `invokestatic`, `invokespecial`, `invokeinterface`), returns (`ireturn`, `lreturn`, `areturn`, `return`).
-  - Branch instructions with jump offset patching (`ifeq`, `ifne`, `if_icmpgt`, `if_icmplt`, `goto`, `instanceof`, `checkcast`).
-  - Expression-based `when` evaluation supporting literals, `is Type`, and `!is Type` branches.
-  - Range loops (`for (i in 1..5)`) and collection iterator loops (`for (item in list)`).
-- [x] 🏛️ **OOP & Member Instantiation**:
-  - Classes, data classes, interfaces, constructor parameter field initialization, and member functions (`Developer.printDetails()`).
-  - String interpolation via high-efficiency `StringBuilder` chaining for objects and primitives.
-- [x] 📦 **Zero-Dependency JAR Packager**:
-  - Standalone pure-Rust ZIP archiver generating valid runnable JARs with `META-INF/MANIFEST.MF` specifying `Main-Class`.
-  - Added `k3 build <file.kt> [-o <out.jar>]` CLI command.
-- [x] 📊 **Verification & Conformance**:
-  - 100% byte-for-byte execution output match against official JetBrains `kotlinc 2.4.21` across all examples with **1,200x–2,950x** cold build speedup!
+### Milestone 3: Advanced Language Features & OOP Semantics (v0.9.0 – v0.9.5)
+- [ ] **Phase 13: Operator Overloading & Custom Infix Functions (v0.9.0)**:
+  - User-defined operator conventions (`plus`, `minus`, `times`, `div`, `rem`, `rangeTo`, `rangeUntil`).
+  - Indexing operators (`get`, `set`), comparison operators (`compareTo`), iterator operator (`iterator`).
+  - Infix function calls (`a matches b`, `dev loves lang`).
+- [ ] **Phase 14: Delegated Properties & Built-in Delegates (v0.9.1)**:
+  - Property delegation syntax: `val x by lazy { ... }`.
+  - Standard delegates: `Delegates.observable`, `Delegates.vetoable`, `Delegates.notNull`.
+  - Custom `ReadOnlyProperty` and `ReadWriteProperty` resolution.
+- [ ] **Phase 15: Inline Value Classes & Primitive Unboxing (v0.9.2)**:
+  - `@JvmInline value class Password(val value: String)`.
+  - Method mangling (`<name>-$hash`) on JVM and direct unboxed values on Zig Native.
+- [ ] **Phase 16: Sealed Classes, Sealed Interfaces & Exhaustive When (v0.9.3)**:
+  - Exhaustive branch validation without mandatory `else` in `when`.
+  - Sealed hierarchies across multi-file compilation units.
+- [ ] **Phase 17: Generics, Variance & Projections (v0.9.4)**:
+  - Declaration-site variance (`out T`, `in T`) and use-site projections (`List<out Number>`).
+  - Reified type parameters in inline functions (`inline fun <reified T> parse()`).
+  - Unchecked cast warnings and safe cast operator (`as?`).
+- [ ] **Phase 18: Reflection Metadata & KClass Runtime (v0.9.5)**:
+  - `MyClass::class`, `KClass`, `KType`, `KProperty`, `KFunction`.
+  - Automatic generation of `@kotlin.Metadata` protobuf annotations in JVM classfiles.
 
 ---
 
-### Phase 5: Backend IR & Composable Lowerings (v0.5.0) — *Completed*
-```mermaid
-flowchart TD
-    FIR["FIR Semantic Tree"] --> FIR2IR["FIR to IR Translator"]
-    FIR2IR --> CommonIR["Universal Backend IR (k3_ir)"]
-    CommonIR --> Pipe["Composable Lowering Pipeline"]
-    Pipe --> CPS["AddContinuationLowering (CPS State Machines)"]
-    Pipe --> Def["DefaultArgumentStubLowering ($default Stubs)"]
-    Pipe --> Inline["FunctionInliningLowering (Call-site Inlining)"]
-    Pipe --> Val["ValueClassLowering (Primitive Unboxing)"]
-    Pipe --> LowIR["Lowered Target-Neutral IR"]
-```
-- [x] 🔄 **Universal Backend IR (`crates/k3_ir/src/ir.rs`)**:
-  - Target-decoupled abstract syntax tree representing executable logic (`IrModule`, `IrFile`, `IrDeclaration`, `IrStatement`, `IrExpression`).
-  - Structured expressions for calls, field access, control flow (`When`, `For`, `While`, `StateSwitch`), and type operations.
-- [x] ⚙️ **Core Lowering Transformations (`crates/k3_ir/src/lowerings/`)**:
-  - **Coroutines CPS Lowering (`AddContinuationLowering`)**:
-    - Automatically appends `$completion: Continuation<T>` parameter and sets return type to `Any?`.
-    - Generates synthetic state-machine continuation classes (`<package>.<func>$Continuation` extending `ContinuationImpl`).
-    - Wraps suspend function body in state switch (`StateSwitch`) with state labels for suspension points.
-  - **Default Parameter Stubs (`DefaultArgumentStubLowering`)**:
-    - Generates synthetic `<name>$default` functions and `<init>$default` constructors with integer bitmask (`$mask0`) and marker parameters.
-    - Bitwise evaluation `(mask & (1 << i)) != 0` for omitted parameter fallback.
-  - **Inline Functions & Lambdas (`FunctionInliningLowering`)**:
-    - Eliminates function object and closure allocations by inlining call-sites directly into caller bodies.
-  - **Value Classes (`ValueClassLowering`)**:
-    - Unboxes inline value classes to underlying primitive representations.
-- [x] 🛠️ **CLI Universal IR Inspection**:
-  - Implemented `k3 ir <file.kt>` command in `crates/k3_cli` to inspect lowered IR trees in real time.
-- [x] 📊 **Verification & Benchmarks**:
-  - Zero-warning compilation with 100% unit test coverage (`test_coroutine_cps_lowering`, `test_default_argument_stub_lowering`, `test_function_inlining_lowering`).
-  - Verified **1,045x–4,648x** compilation speedup over JetBrains Kotlin K2 in [COMPARISON.md](COMPARISON.md).
+### Milestone 4: Coroutines, Channels & Reactive Flow Ecosystem (v0.10.0 – v0.11.2)
+- [ ] **Phase 19: Coroutines Core Runtime (`kotlinx.coroutines`) (v0.10.0)**:
+  - `CoroutineScope`, `launch`, `async`, `Job`, `Deferred<T>`, `await()`.
+  - Lowers suspend function body to Continuation-Passing Style (CPS) state-machines.
+- [ ] **Phase 20: Structured Concurrency & Supervisor Hierarchy (v0.10.1)**:
+  - Parent-child coroutine cancellation propagation, `SupervisorJob`, `coroutineScope {}`.
+  - Cancellation tokens, timeout handlers (`withTimeout`, `withTimeoutOrNull`).
+- [ ] **Phase 21: High-Performance Work-Stealing Dispatchers (v0.10.2)**:
+  - `Dispatchers.Default` (multi-threaded CPU pool), `Dispatchers.IO` (blocking thread pool).
+  - `Dispatchers.Main` (UI event loop binding), `Dispatchers.Unconfined`.
+- [ ] **Phase 22: Channels & Async Data Pipes (v0.11.0)**:
+  - `Channel<T>`: Rendezvous, buffered, conflated, and unlimited channels.
+  - Producer-consumer patterns, fan-out / fan-in worker pools.
+- [ ] **Phase 23: Cold & Hot Streams Engine (`Flow<T>`, `StateFlow`) (v0.11.1)**:
+  - Cold `Flow<T>` streams, intermediate operators (`map`, `filter`, `take`, `zip`, `combine`).
+  - Hot state holders: `StateFlow<T>` and `SharedFlow<T>` with atomic state updates.
+- [ ] **Phase 24: Complex Async Synchronization (`select {}`, Mutex) (v0.11.2)**:
+  - `select {}` multiplexing expression over multiple channels and deferreds.
+  - Async synchronization primitives: `Mutex`, `Semaphore`, and atomic counters.
 
 ---
 
-### Phase 6: Zig Native Runtime & Multiplatform Codegen (v0.6.0) — *Completed*
-```mermaid
-flowchart TD
-    AST["Kotlin Syntax AST"] --> NativeGen["k3_native Generator"]
-    NativeGen --> ZigSrc["Zig Intermediate Source"]
-    ZigSrc --> ZigCompiler["Zig 0.17 Compiler (ReleaseFast)"]
-    Runtime["Embedded Zig Native Runtime (runtime.zig)"] --> ZigCompiler
-    ZigCompiler --> StandaloneBin["Standalone Executable (< 1 MB ELF)"]
-    
-    subgraph RuntimeDetails ["Native Runtime Engine"]
-        DirectSyscall["Direct OS Syscalls (Linux write / POSIX)"]
-        K3Any["K3Any Tagged Union & Smart Casts"]
-        CPSCont["Lightweight Coroutine Continuation"]
-        ListEngine["No-Alloc List & Collection Engine"]
-    end
-    RuntimeDetails -.-> Runtime
-```
-- [x] ⚡ **Minimal Native Runtime (`runtime/src/runtime.zig`)**:
-  - Embedded zero-dependency native runtime written in Zig 0.17.
-  - Tagged polymorphic container (`K3Any`) supporting `Int`, `Long`, `Float`, `Double`, `String`, `Boolean`, `List`, and `Object`.
-  - Non-allocating collection formatting and transformations (`format_list`, `filter`, `map`).
-  - CPS continuation primitive for Kotlin coroutines.
-- [x] 🎯 **Dedicated Native Backend Crate (`crates/k3_native/`)**:
-  - `NativeCodegen` AST-to-Zig translator generating idiomatic Zig code.
-  - Classes, data classes with member functions, and default property values.
-  - Pattern matching `when` expressions, range loops, and collection iterations.
-  - Synthetic closure and lambda generation.
-- [x] 🚀 **Direct Zig Toolchain Coordinator (`k3_native::NativeCompiler`)**:
-  - Seamlessly discovers Zig 0.17 compiler from environment or system paths.
-  - In-memory embedded `runtime.zig` via `include_str!` for 100% self-contained toolchain.
-- [x] 🔀 **CLI Integration**:
-  - `k3 native <file.kt> [-o <out_bin>]`: Compiles Kotlin source directly to standalone native ELF binary.
-  - `k3 run <file.kt> [--jvm]`: Compiles and executes immediately with sub-millisecond native startup by default.
-- [x] 📊 **Sub-Millisecond Execution & Extreme Footprint**:
-  - Standalone binaries run in **0.59 ms – 0.78 ms** (**98x–137x faster** than JVM execution).
-  - Standalone binary footprint is **< 1 MB (977 KB – 992 KB)** with zero dependencies.
-  - 100% byte-for-byte output match against official JetBrains `kotlinc 2.4.21` across all benchmarks!
+### Milestone 5: Serialization, Formats & Config Ecosystem (v0.12.0 – v0.13.1)
+- [ ] **Phase 25: Kotlinx Serialization Compiler Plugin (v0.12.0)**:
+  - `@Serializable`, `@SerialName`, `@Transient` annotations.
+  - Synthetic serializer generator producing `KSerializer<T>` and `SerialDescriptor`.
+- [ ] **Phase 26: Zero-Allocation Streaming JSON Parser (v0.12.1)**:
+  - High-speed SIMD JSON token scanner emitting native objects without intermediate AST trees.
+  - Polymorphic class discriminators and lenient parsing modes.
+- [ ] **Phase 27: Protocol Buffers & Binary Serialization (v0.12.2)**:
+  - Compact binary protobuf serializer (`kotlinx-serialization-protobuf`).
+  - CBOR format serializer for low-latency IoT and microservice payloads.
+- [ ] **Phase 28: DateTime & High-Precision Chrono Runtime (v0.13.0)**:
+  - Full compatibility with `kotlinx-datetime` (`Instant`, `LocalDate`, `TimeZone`, `Duration`).
+  - ISO-8601 formatting and timezone calculation engine.
+- [ ] **Phase 29: Immutable & Persistent Data Collections (v0.13.1)**:
+  - `kotlinx.collections.immutable`: `persistentListOf()`, `persistentSetOf()`, `persistentMapOf()`.
+  - RRB-Tree and Hash-Array-Mapped-Trie (HAMT) structural sharing verification.
 
 ---
 
-### Phase 7: KLib Ecosystem & Self-Hosting (v0.7.0 – v1.0.0) — *Active*
-- [ ] 📦 **KLib Architecture**:
-  - Read and write standard `.klib` packages compatible with JetBrains Kotlin.
-  - Maven Central and Gradle dependency resolution for `.jar` and `.klib` libraries.
-- [ ] 🔄 **Self-Hosting Milestone**:
-  - Kotlin3 compiles its own standard library and Kotlin-written tooling modules.
-  - Continuous validation against JetBrains official `compiler/testData/` conformance suite.
-  - Continuous validation against JetBrains official `compiler/testData/` conformance suite.
+### Milestone 6: Native IO, Networking & Web Frameworks (v0.14.0 – v0.15.2)
+- [ ] **Phase 30: Native IO Engine (`kotlinx-io`) (v0.14.0)**:
+  - Zero-copy buffer architecture (`Buffer`, `Source`, `Sink`).
+  - Native file descriptor read/write and memory-mapped IO.
+- [ ] **Phase 31: Ktor HTTP Client Integration (v0.14.1)**:
+  - `HttpClient` with engine adapters (CIO, OkHttp, Zig Native sockets).
+  - JSON content negotiation, auth plugins, and WebSocket duplex streaming.
+- [ ] **Phase 32: Ktor HTTP Server Engine (v0.14.2)**:
+  - `embeddedServer` routing DSL, path parameter matching, call pipelines.
+  - Native non-blocking HTTP/1.1 and HTTP/2 socket server via Zig networking.
+- [ ] **Phase 33: OkHttp & Retrofit JVM Interoperability (v0.15.0)**:
+  - Bytecode compatibility with OkHttp interceptors and connection pooling.
+  - Retrofit dynamic interface proxy synthesis and Coroutine call adapters.
+- [ ] **Phase 34: Micro-Web Frameworks Conformance (Javalin, Http4k) (v0.15.1)**:
+  - Conformance test suite running Javalin REST applications.
+  - Pure functional Http4k routing and filter chains execution.
+- [ ] **Phase 35: Enterprise Framework Compatibility (Spring Boot 3.x) (v0.15.2)**:
+  - Compatibility with Spring Boot 3 with Kotlin extensions.
+  - Spring WebFlux reactive controllers using Kotlin Coroutines and Flows.
 
 ---
 
-## 📊 Target Performance Benchmarks
-
-| Metric | Official `kotlinc` (JVM + Gradle) | Kotlin3 Target (`k3`) | Projected Improvement |
-| :--- | :--- | :--- | :---: |
-| **Cold Startup Time** | ~1,200 ms - 2,500 ms | **< 15 ms** | **~100x faster** |
-| **Small Project Build (10 files)** | ~3,500 ms (Gradle init + daemon) | **< 50 ms** | **~70x faster** |
-| **Medium Project Build (500 files)** | ~12,000 ms | **< 400 ms** | **~30x faster** |
-| **Peak Memory Consumption** | ~800 MB - 2.5 GB (JVM Heap) | **< 60 MB** | **~95% less RAM** |
-| **Native Binary Output Size** | ~35 MB (Kotlin/Native) | **< 4 MB** | **~9x smaller** |
+### Milestone 7: Database, ORM & Persistence Frameworks (v0.16.0 – v0.16.4)
+- [ ] **Phase 36: Exposed ORM Integration (v0.16.0)**:
+  - JetBrains Exposed SQL DSL (`Table`, `select`, `insert`, `update`).
+  - DAO entity relations, connection pooling, and multi-dialect SQL generation.
+- [ ] **Phase 37: SQLDelight Multiplatform Database Engine (v0.16.1)**:
+  - Compile-time SQL verification and type-safe query generation.
+  - SQLite, MySQL, and PostgreSQL native driver bindings.
+- [ ] **Phase 38: Ktorm & Light ORM Validation (v0.16.2)**:
+  - Ktorm query sequences, SQL aggregation expressions, and transaction managers.
+- [ ] **Phase 39: Android Room & SQLite Engine (v0.16.3)**:
+  - Room DAO interfaces, `@Query`, `@Insert`, and Flow-based reactive queries.
+- [ ] **Phase 40: NoSQL & Key-Value Store Connectors (v0.16.4)**:
+  - Redis client protocol integration and MongoDB BSON serialization.
+  - Embedded RocksDB storage engine native C bindings via Zig `@cImport`.
 
 ---
 
-## 🤝 How to Contribute
-See [CONTRIBUTING.md](file:////wsl.localhost/Ubuntu/home/xagi/Kotlin3/kotlin3/docs/contributing.md) for local development workflows, issue tracking, and testing guidelines.
+### Milestone 8: Dependency Injection & Architecture Frameworks (v0.17.0 – v0.17.3)
+- [ ] **Phase 41: Koin Pure Kotlin DI Engine (v0.17.0)**:
+  - Koin module DSL: `single`, `factory`, `scoped`, `get()`.
+  - Constructor reflection resolution and multiplatform scope management.
+- [ ] **Phase 42: Dagger & Anvil Annotation Processor Interop (v0.17.1)**:
+  - Processing `@Inject`, `@Component`, `@Module` dependency graphs.
+- [ ] **Phase 43: Kodein Multiplatform DI Validation (v0.17.2)**:
+  - Lazy retrieval, multiton bindings, and thread-local container injection.
+- [ ] **Phase 44: Kotlin Symbol Processing (KSP) Protocol (v0.17.3)**:
+  - KSP compiler plugin host API (`SymbolProcessor`, `Resolver`, `KSFile`).
+  - Incremental symbol cache and source file generation pipeline.
+
+---
+
+### Milestone 9: Android Jetpack, UI & Compose Multiplatform (v0.18.0 – v0.18.4)
+- [ ] **Phase 45: Android Jetpack Lifecycle & ViewModel (v0.18.0)**:
+  - `ViewModel`, `viewModelScope`, `SavedStateHandle`, lifecycle events.
+- [ ] **Phase 46: Compose Multiplatform Compiler Plugin (v0.18.1)**:
+  - `@Composable` function transformation into slot table restartable groups.
+  - Dynamic key injection and composition-local state memoization.
+- [ ] **Phase 47: Compose Desktop GUI Validation (Skia) (v0.18.2)**:
+  - Jetpack Compose Desktop windowing, hardware accelerated Skia rendering.
+- [ ] **Phase 48: Compose Web & WebAssembly UI (v0.18.3)**:
+  - Compose for Web Canvas / WASM rendering and DOM bridge events.
+- [ ] **Phase 49: Compose iOS / Mobile Target (v0.18.4)**:
+  - Skiko iOS rendering pipeline and touch event dispatching.
+
+---
+
+### Milestone 10: Multiplatform Targets & Cross-Compilation (v0.19.0 – v0.19.4)
+- [ ] **Phase 50: Standard KLib Format Specification (v0.19.0)**:
+  - Serializing and reading `.klib` archives (Protobuf metadata `.knm` and serialized IR).
+- [ ] **Phase 51: Apple Darwin Target (macOS / iOS Mach-O) (v0.19.1)**:
+  - Cross-compilation to Apple Silicon (arm64) and Intel (x86_64) Mach-O binaries.
+  - Direct Objective-C / Swift bridging and Automatic Reference Counting (ARC).
+- [ ] **Phase 52: Windows Native Target (PE/COFF 64-bit) (v0.19.2)**:
+  - Standalone Windows `.exe` output with direct Win32 syscalls and MSVC ABI.
+- [ ] **Phase 53: WebAssembly / WASI Standalone Target (v0.19.3)**:
+  - Emitting Wasm GC binaries and WASI Preview 1/2 serverless modules.
+- [ ] **Phase 54: JavaScript / Node.js Target (v0.19.4)**:
+  - Emitting optimized ES2022 JavaScript with TypeScript `.d.ts` declaration headers.
+
+---
+
+### Milestone 11: Static Analysis, Quality & Conformance Test Suites (v0.20.0 – v0.20.3)
+- [ ] **Phase 55: Arrow Functional Ecosystem (v0.20.0)**:
+  - Arrow Core: `Either`, `Option`, `Ior`, `Raise` DSL for typed error handling.
+- [ ] **Phase 56: Detekt & KtLint Static Analysis (v0.20.1)**:
+  - Running Detekt rulesets and KtLint automated style formatting on Kotlin3 AST.
+- [ ] **Phase 57: MockK & Testing Framework Interop (v0.20.2)**:
+  - Bytecode instrumentation, dynamic mocking (`every { ... } returns ...`), Kotest suite.
+- [ ] **Phase 58: JetBrains Conformance Suite (compiler/testData) (v0.20.3)**:
+  - Automated runner executing thousands of official test files from `jetbrains/kotlin`.
+
+---
+
+### Milestone 12: Build Systems, Package Management & Memory Engine (v0.21.0 – v1.0.0)
+- [ ] **Phase 59: Maven Central & Gradle Module Metadata (v0.21.0)**:
+  - Direct Maven coordinate resolution (`group:artifact:version`) and POM parsing.
+- [ ] **Phase 60: Standalone Package Manager (`k3 add`, `k3 lockfile`) (v0.21.1)**:
+  - Fast, parallel dependency downloading, SHA-512 verification, and reproducible lockfiles.
+- [ ] **Phase 61: Generational Concurrent Tracing GC & Allocators (v0.22.0)**:
+  - Generational garbage collector for Zig Native target with zero stop-the-world pauses.
+  - Thread-local bump allocators for sub-microsecond object creation.
+- [ ] **Phase 62: Full Self-Hosting Cycle & Reproducibility (v1.0.0)**:
+  - Kotlin3 compiles its own standard library, compiler frontend, and backend.
+  - Bit-for-bit reproducible binary verification (Kotlin3 compiling Kotlin3!).
+
+---
+
+## 🧪 Error-Catching & Testing Methodology
+
+For each phase, the following three-step verification rule is enforced:
+1. **Side-by-Side Execution**: Run code under both official JetBrains `kotlinc` K2 and `k3`.
+2. **Byte-for-Byte Output Verification**: Compare stdout, stderr, and return codes.
+3. **Automated Regression Tracking**: Update `COMPARISON.md` with execution latency, cold build speed, and memory footprint.
