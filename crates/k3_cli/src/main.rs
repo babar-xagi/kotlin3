@@ -1,12 +1,14 @@
 use clap::{Parser, Subcommand};
+use k3_fir::analyze;
 use k3_syntax::{Lexer, Parser as KtParser};
 use std::fs;
 use std::path::PathBuf;
+use std::process;
 
 #[derive(Parser, Debug)]
 #[command(name = "k3")]
 #[command(author = "Kotlin3 Project")]
-#[command(version = "0.2.0")]
+#[command(version = "0.3.0")]
 #[command(about = "Ultra-fast, next-generation Kotlin compiler and toolchain written in Rust & Zig", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -62,15 +64,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Check { file } => {
             let content = fs::read_to_string(&file)?;
+            let file_str = file.to_string_lossy();
             let mut lexer = Lexer::new(&content);
-            let tokens = lexer.tokenize()?;
+            let tokens = match lexer.tokenize() {
+                Ok(t) => t,
+                Err(err) => {
+                    eprintln!("{}:{}: error: {}", file_str, err.span, err);
+                    process::exit(1);
+                }
+            };
+
             let mut parser = KtParser::new(tokens, content.len() as u32);
-            let ast = parser.parse_file()?;
-            println!(
-                "✓ Syntax check passed for {} ({} declarations parsed)",
-                file.display(),
-                ast.declarations.len()
-            );
+            let ast = match parser.parse_file() {
+                Ok(a) => a,
+                Err(err) => {
+                    eprintln!("{}:{}: syntax error: {}", file_str, err.span, err.message);
+                    process::exit(1);
+                }
+            };
+
+            let (_, diagnostics) = analyze(&ast);
+
+            let mut has_errors = false;
+            for diag in &diagnostics {
+                eprintln!("{}", diag.format_with_source(&content, &file_str));
+                if diag.severity == k3_fir::DiagnosticSeverity::Error {
+                    has_errors = true;
+                }
+            }
+
+            if has_errors {
+                eprintln!("\n❌ Check failed with {} error(s) for {}", diagnostics.len(), file_str);
+                process::exit(1);
+            } else {
+                println!(
+                    "✓ Type check passed for {} ({} top-level declaration(s) verified)",
+                    file_str,
+                    ast.declarations.len()
+                );
+            }
         }
     }
 

@@ -5,3 +5,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+k3_syntax = { path = "../k3_syntax" }
+thiserror = { workspace = true }

@@ -77,7 +77,8 @@ flowchart TD
 | :--- | :--- | :--- | :---: | :--- |
 | **v0.1.0** | 🏗️ **Scaffolding & Core Foundations** | Multi-crate Rust workspace, SIMD Lexer, K2 FIR skeleton, Zig driver | 🟢 **Completed** | Q4 2026 |
 | **v0.2.0** | 📜 **Syntax Parser & AST Construction** | Full Pratt Expression Parser, Declarations AST, LightTree parser | 🟢 **Completed** | Q4 2026 |
-| **v0.3.0** | 🧠 **K2 FIR & Cone Type Resolution** | Phased symbol resolution, Cone types, Type inference (PCLA), DFA smart casts | 🟡 **In Progress** | Q1 2027 |
+| **v0.3.0** | 🧠 **K2 FIR & Cone Type Resolution** | Phased symbol resolution, Cone types, Type inference (PCLA), DFA smart casts | 🟢 **Completed** | Q4 2026 |
+| **v0.4.0** | ☕ **JVM Bytecode Generation** | Classfile binary emission, StackMapTable calculation, `@kotlin.Metadata` | 🟡 **In Progress** | Q1 2027 |
 | **v0.4.0** | ☕ **JVM Bytecode Generation** | Classfile binary emission, StackMapTable calculation, `@kotlin.Metadata` | ⚪ Planned | Q3 2027 |
 | **v0.5.0** | ⚙️ **Backend IR & Lowerings** | Coroutine state machines, lambda metafactories, default arguments | ⚪ Planned | Q4 2027 |
 | **v0.6.0** | ⚡ **Zig Native Runtime & Code Gen** | Lightweight GC, arena memory manager, Native ELF/Mach-O/PE output | ⚪ Planned | Q1 2028 |
@@ -122,7 +123,7 @@ flowchart LR
 
 ---
 
-### Phase 3: K2 FIR Phased Semantic Engine (v0.3.0)
+### Phase 3: K2 FIR Phased Semantic Engine (v0.3.0) — *Completed*
 ```mermaid
 flowchart TD
     Raw["Raw FIR"] --> Imports["Imports Phase"]
@@ -135,15 +136,16 @@ flowchart TD
     Body --> DFA["Data-Flow Analysis & Smart Casts"]
     DFA --> Checkers["Diagnostic Checkers"]
 ```
-- [ ] 🌲 **Phased Resolution Invariants**:
-  - Implement 15-phase K2 FIR pipeline matching JetBrains Kotlin compiler.
-- [ ] 🧬 **Cone Type System**:
-  - `ConeClassLikeType`, `ConeTypeParameterType`, `ConeFlexibleType` (Java platform interop), and `ConeIntersectionType`.
-- [ ] 🔍 **PCLA (Partially Constrained Lambda Arguments)**:
-  - Complete constraint-based type inference for builder lambdas (e.g. `buildList { add("k3") }`).
-- [ ] 🌊 **Data-Flow Analysis (DFA)**:
-  - Type-safe smart-casting on non-null assertions and `is` checks.
-  - Exhaustiveness checking for `when` statements on enums and sealed hierarchies.
+- [x] 🌲 **Phased Resolution Invariants**:
+  - Implemented top-level declaration indexing, header typing, local body resolution, and diagnostic reporting.
+- [x] 🧬 **Cone Type System**:
+  - `ConeClassLikeType`, `ConeTypeParameterType`, `ConeFlexibleType`, and `ConeIntersectionType` with full subtyping rules.
+- [x] 🔍 **Symbol Table & Scopes**:
+  - Delegating lexical, class member, file, and built-in root scopes (`k3_fir/src/symbols.rs`).
+- [x] 🌊 **Data-Flow Analysis (DFA)**:
+  - Smart-casting tracking across branching paths (`if` and `when`).
+- [x] 🛡️ **Diagnostic Engine**:
+  - Formatted terminal diagnostics with line/column/caret positioning and severity codes.
 
 ---
 

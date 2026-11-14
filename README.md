@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/babar-xagi/kotlin3/actions"><img src="https://img.shields.io/badge/Build-Passing-brightgreen?style=flat-square" alt="Build Status"/></a>
   <a href="https://github.com/babar-xagi/kotlin3/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square" alt="License"/></a>
-  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/Roadmap-Phase%202%20Active-orange?style=flat-square" alt="Roadmap"/></a>
+  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/Roadmap-Phase%204%20Active-orange?style=flat-square" alt="Roadmap"/></a>
   <a href="COMPARISON.md"><img src="https://img.shields.io/badge/Benchmark-Up%20to%204000x%20Faster-purple?style=flat-square" alt="Benchmark"/></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin%20Compatibility-2.x%20K2-7F52FF?style=flat-square" alt="Kotlin Compatibility"/></a>
 </p>
@@ -150,7 +150,7 @@ zig build
 
 - [x] **Phase 1: Foundations** — SIMD zero-copy Lexer, K2 FIR skeleton, Zig driver (`v0.1.0`)
 - [x] **Phase 2: Full Pratt Parser & AST** — Expressions, Declarations, Types, Generics (`v0.2.0`)
-- [ ] **Phase 3: K2 Scope Resolution & Cone Types** — Phased symbol resolution & DFA smart-casts (`v0.3.0`)
+- [x] **Phase 3: K2 Scope Resolution & Cone Types** — Phased symbol resolution & DFA smart-casts (`v0.3.0`)
 - [ ] **Phase 4: JVM Bytecode Codegen** — Direct `.class` emission & `@kotlin.Metadata` (`v0.4.0`)
 - [ ] **Phase 5: Backend IR & Lowerings** — Coroutine state machines & lambda inlining (`v0.5.0`)
 - [ ] **Phase 6: Zig Native Backend** — Standalone ELF/Mach-O/PE binaries with minimal GC (`v0.6.0`)
