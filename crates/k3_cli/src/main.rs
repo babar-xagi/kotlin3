@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand};
-use k3_syntax::Lexer;
+use k3_syntax::{Lexer, Parser as KtParser};
 use std::fs;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(name = "k3")]
 #[command(author = "Kotlin3 Project")]
-#[command(version = "0.1.0")]
+#[command(version = "0.2.0")]
 #[command(about = "Ultra-fast, next-generation Kotlin compiler and toolchain written in Rust & Zig", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -17,6 +17,11 @@ struct Cli {
 enum Commands {
     /// Tokenize and inspect Kotlin source file
     Lex {
+        /// Source file path (.kt, .kts)
+        file: PathBuf,
+    },
+    /// Parse Kotlin source file into AST
+    Parse {
         /// Source file path (.kt, .kts)
         file: PathBuf,
     },
@@ -37,14 +42,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let tokens = lexer.tokenize()?;
             println!("Lexed {} tokens successfully from {}:", tokens.len(), file.display());
             for token in tokens {
-                println!("  [{:>4}..{:<4}] {:<24} {:?}", token.span.start, token.span.end, format!("{:?}", token.kind), token.text);
+                println!(
+                    "  [{:>4}..{:<4}] {:<24} {:?}",
+                    token.span.start,
+                    token.span.end,
+                    format!("{:?}", token.kind),
+                    token.text
+                );
             }
+        }
+        Commands::Parse { file } => {
+            let content = fs::read_to_string(&file)?;
+            let mut lexer = Lexer::new(&content);
+            let tokens = lexer.tokenize()?;
+            let mut parser = KtParser::new(tokens, content.len() as u32);
+            let ast = parser.parse_file()?;
+            println!("Successfully parsed {}:", file.display());
+            println!("{:#?}", ast);
         }
         Commands::Check { file } => {
             let content = fs::read_to_string(&file)?;
             let mut lexer = Lexer::new(&content);
             let tokens = lexer.tokenize()?;
-            println!("✓ Syntax check passed for {} ({} tokens)", file.display(), tokens.len());
+            let mut parser = KtParser::new(tokens, content.len() as u32);
+            let ast = parser.parse_file()?;
+            println!(
+                "✓ Syntax check passed for {} ({} declarations parsed)",
+                file.display(),
+                ast.declarations.len()
+            );
         }
     }
 
