@@ -527,32 +527,56 @@ impl NativeCodegen {
                     let var_name = &variable.name;
                     if let Expression::Binary {
                         left,
-                        op: BinaryOp::Range,
+                        op,
                         right,
                         ..
                     } = &**iterable
                     {
-                        // Range loop: for (i in 1..5)
-                        let start_str = self.expression_to_string(left)?;
-                        let end_str = self.expression_to_string(right)?;
-                        self.emit_line(&format!("var {}: i64 = {};", var_name, start_str));
-                        self.emit_line(&format!(
-                            "while ({} <= {}) : ({} += 1) {{",
-                            var_name, end_str, var_name
-                        ));
-                        self.indent_level += 1;
+                        if *op == BinaryOp::Range {
+                            // Range loop: for (i in 1..5)
+                            let start_str = self.expression_to_string(left)?;
+                            let end_str = self.expression_to_string(right)?;
+                            self.emit_line(&format!("var {}: i64 = {};", var_name, start_str));
+                            self.emit_line(&format!(
+                                "while ({} <= {}) : ({} += 1) {{",
+                                var_name, end_str, var_name
+                            ));
+                            self.indent_level += 1;
 
-                        if let Expression::Block(stmts, _) = &**body {
-                            for s in stmts {
-                                self.generate_statement(s)?;
+                            if let Expression::Block(stmts, _) = &**body {
+                                for s in stmts {
+                                    self.generate_statement(s)?;
+                                }
+                            } else {
+                                let b_str = self.expression_to_string(body)?;
+                                self.emit_line(&b_str);
                             }
-                        } else {
-                            let b_str = self.expression_to_string(body)?;
-                            self.emit_line(&b_str);
-                        }
 
-                        self.indent_level -= 1;
-                        self.emit_line("}");
+                            self.indent_level -= 1;
+                            self.emit_line("}");
+                        } else if *op == BinaryOp::Until || *op == BinaryOp::RangeExclusive {
+                            // Exclusive loop: for (i in 0 until n)
+                            let start_str = self.expression_to_string(left)?;
+                            let end_str = self.expression_to_string(right)?;
+                            self.emit_line(&format!("var {}: i64 = {};", var_name, start_str));
+                            self.emit_line(&format!(
+                                "while ({} < {}) : ({} += 1) {{",
+                                var_name, end_str, var_name
+                            ));
+                            self.indent_level += 1;
+
+                            if let Expression::Block(stmts, _) = &**body {
+                                for s in stmts {
+                                    self.generate_statement(s)?;
+                                }
+                            } else {
+                                let b_str = self.expression_to_string(body)?;
+                                self.emit_line(&b_str);
+                            }
+
+                            self.indent_level -= 1;
+                            self.emit_line("}");
+                        }
                     } else {
                         // Collection loop: for (member in team)
                         let iter_str = self.expression_to_string(iterable)?;
@@ -860,16 +884,26 @@ impl NativeCodegen {
             Expression::Binary { left, op, right, .. } => {
                 let l = self.expression_to_string(left)?;
                 let r = self.expression_to_string(right)?;
-                let op_str = match op {
-                    BinaryOp::Add => "+",
-                    BinaryOp::Sub => "-",
-                    BinaryOp::Mul => "*",
-                    BinaryOp::Div => "/",
-                    BinaryOp::Eq => "==",
-                    BinaryOp::NotEq => "!=",
-                    _ => "+",
-                };
-                Ok(format!("{} {} {}", l, op_str, r))
+                match op {
+                    BinaryOp::Add => Ok(format!("{} + {}", l, r)),
+                    BinaryOp::Sub => Ok(format!("{} - {}", l, r)),
+                    BinaryOp::Mul => Ok(format!("{} * {}", l, r)),
+                    BinaryOp::Div => Ok(format!("@divTrunc({}, {})", l, r)),
+                    BinaryOp::Mod => Ok(format!("@mod({}, {})", l, r)),
+                    BinaryOp::Eq => Ok(format!("{} == {}", l, r)),
+                    BinaryOp::NotEq => Ok(format!("{} != {}", l, r)),
+                    BinaryOp::Less => Ok(format!("{} < {}", l, r)),
+                    BinaryOp::LessEq => Ok(format!("{} <= {}", l, r)),
+                    BinaryOp::Greater => Ok(format!("{} > {}", l, r)),
+                    BinaryOp::GreaterEq => Ok(format!("{} >= {}", l, r)),
+                    BinaryOp::Shl => Ok(format!("{} << @intCast({})", l, r)),
+                    BinaryOp::Shr => Ok(format!("{} >> @intCast({})", l, r)),
+                    BinaryOp::Ushr => Ok(format!("@as(u64, @bitCast({})) >> @intCast({})", l, r)),
+                    BinaryOp::BitAnd => Ok(format!("{} & {}", l, r)),
+                    BinaryOp::BitOr => Ok(format!("{} | {}", l, r)),
+                    BinaryOp::BitXor => Ok(format!("{} ^ {}", l, r)),
+                    _ => Ok(format!("{} + {}", l, r)),
+                }
             }
             Expression::MemberAccess { target, member, .. } => {
                 let t = self.expression_to_string(target)?;

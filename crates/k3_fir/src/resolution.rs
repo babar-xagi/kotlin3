@@ -308,8 +308,20 @@ impl Resolver {
 
                 if let Some(var) = scope.find_variable(&id.name) {
                     var.var_type.clone()
-                } else if scope.find_function(&id.name).is_some() || scope.find_class(&id.name).is_some() {
+                } else if let Some(c) = scope.find_class(&id.name) {
+                    ConeKotlinType::ClassLike {
+                        name: c.name.clone(),
+                        type_arguments: vec![],
+                        nullability: ConeNullability::NotNull,
+                    }
+                } else if scope.find_function(&id.name).is_some() {
                     ConeKotlinType::any(false)
+                } else if matches!(id.name.as_str(), "System" | "Math" | "java" | "require" | "error" | "check" | "IntArray" | "ByteArray" | "LongArray") {
+                    ConeKotlinType::ClassLike {
+                        name: id.name.clone(),
+                        type_arguments: vec![],
+                        nullability: ConeNullability::NotNull,
+                    }
                 } else {
                     self.diagnostics.push(Diagnostic::error(
                         DiagnosticCode::UnresolvedReference(id.name.clone()),
@@ -356,11 +368,18 @@ impl Resolver {
                         // `a ?: b` returns un-nullified `a` or `b`
                         left_type.make_not_null()
                     }
-                    BinaryOp::Range | BinaryOp::RangeExclusive => ConeKotlinType::ClassLike {
+                    BinaryOp::Range | BinaryOp::RangeExclusive | BinaryOp::Until | BinaryOp::DownTo | BinaryOp::Step => ConeKotlinType::ClassLike {
                         name: "kotlin.ranges.IntRange".to_string(),
                         type_arguments: vec![],
                         nullability: ConeNullability::NotNull,
                     },
+                    BinaryOp::Shl
+                    | BinaryOp::Shr
+                    | BinaryOp::Ushr
+                    | BinaryOp::BitAnd
+                    | BinaryOp::BitOr
+                    | BinaryOp::BitXor => left_type,
+                    BinaryOp::Infix(_) => left_type,
                     BinaryOp::As | BinaryOp::AsSafe => right_type,
                 }
             }
@@ -411,6 +430,22 @@ impl Resolver {
                             type_arguments: vec![],
                             nullability: ConeNullability::NotNull,
                         };
+                    } else if matches!(id.name.as_str(), "require" | "check") {
+                        return ConeKotlinType::unit();
+                    } else if id.name == "error" {
+                        return ConeKotlinType::nothing();
+                    } else if id.name == "IntArray" {
+                        return ConeKotlinType::ClassLike {
+                            name: "kotlin.IntArray".to_string(),
+                            type_arguments: vec![],
+                            nullability: ConeNullability::NotNull,
+                        };
+                    } else if id.name == "ByteArray" {
+                        return ConeKotlinType::ClassLike {
+                            name: "kotlin.ByteArray".to_string(),
+                            type_arguments: vec![],
+                            nullability: ConeNullability::NotNull,
+                        };
                     } else if let Some(var) = scope.find_variable(&id.name) {
                         // Function-typed variable or parameter e.g. predicate(item)
                         return match &var.var_type {
@@ -433,6 +468,28 @@ impl Resolver {
                 } = &**callee
                 {
                     let target_type = self.resolve_expression(target, scope);
+                    match member.name.as_str() {
+                        "toLong" | "nanoTime" | "floorDiv" => return ConeKotlinType::long(),
+                        "toInt" => return ConeKotlinType::int(),
+                        "toIntOrNull" => return ConeKotlinType::ClassLike {
+                            name: "kotlin.Int".to_string(),
+                            type_arguments: vec![],
+                            nullability: ConeNullability::Nullable,
+                        },
+                        "toDouble" => return ConeKotlinType::double(),
+                        "toString" | "format" => return ConeKotlinType::string(),
+                        "getenv" => return ConeKotlinType::ClassLike {
+                            name: "kotlin.String".to_string(),
+                            type_arguments: vec![],
+                            nullability: ConeNullability::Nullable,
+                        },
+                        "toUInt" => return ConeKotlinType::ClassLike {
+                            name: "kotlin.UInt".to_string(),
+                            type_arguments: vec![],
+                            nullability: ConeNullability::NotNull,
+                        },
+                        _ => {}
+                    }
                     if let ConeKotlinType::ClassLike { name, .. } = &target_type {
                         let short_name = name.rsplit('.').next().unwrap_or(name);
                         if let Some(c) = scope.find_class(short_name) {
@@ -454,6 +511,16 @@ impl Resolver {
                 span: _,
             } => {
                 let target_type = self.resolve_expression(target, scope);
+                match member.name.as_str() {
+                    "indices" => return ConeKotlinType::ClassLike {
+                        name: "kotlin.ranges.IntRange".to_string(),
+                        type_arguments: vec![],
+                        nullability: ConeNullability::NotNull,
+                    },
+                    "size" | "length" | "count" => return ConeKotlinType::int(),
+                    "first" | "second" => return ConeKotlinType::int(),
+                    _ => {}
+                }
                 if let ConeKotlinType::ClassLike { name, .. } = &target_type {
                     let short_name = name.rsplit('.').next().unwrap_or(name);
                     if let Some(c) = scope.find_class(short_name) {

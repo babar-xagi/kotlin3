@@ -394,9 +394,26 @@ impl Codegen {
                         BinaryOp::Mul => code.imul(),
                         BinaryOp::Div => code.idiv(),
                         BinaryOp::Mod => code.irem(),
+                        BinaryOp::Shl => code.ishl(),
+                        BinaryOp::Shr => code.ishr(),
+                        BinaryOp::Ushr => code.iushr(),
+                        BinaryOp::BitAnd => code.iand(),
+                        BinaryOp::BitOr => code.ior(),
+                        BinaryOp::BitXor => code.ixor(),
                         _ => {}
                     }
                     Ok(ExprType::Int)
+                } else if left_ty == ExprType::Long || right_ty == ExprType::Long {
+                    match op {
+                        BinaryOp::Shl => code.lshl(),
+                        BinaryOp::Shr => code.lshr(),
+                        BinaryOp::Ushr => code.lushr(),
+                        BinaryOp::BitAnd => code.land(),
+                        BinaryOp::BitOr => code.lor(),
+                        BinaryOp::BitXor => code.lxor(),
+                        _ => {}
+                    }
+                    Ok(ExprType::Long)
                 } else {
                     Ok(ExprType::Object)
                 }
@@ -776,27 +793,50 @@ impl Codegen {
                 *next_slot += 1;
                 locals.insert(variable.name.clone(), var_slot);
 
-                if let Expression::Binary { left, op: BinaryOp::Range, right, .. } = &**iterable {
-                    // Integer range loop: for (i in 1..5)
-                    self.local_types.insert(variable.name.clone(), "I".to_string());
-                    self.compile_expression(left, code, cf, locals, next_slot)?;
-                    code.istore(var_slot);
+                if let Expression::Binary { left, op, right, .. } = &**iterable {
+                    if *op == BinaryOp::Range {
+                        // Integer range loop: for (i in 1..5)
+                        self.local_types.insert(variable.name.clone(), "I".to_string());
+                        self.compile_expression(left, code, cf, locals, next_slot)?;
+                        code.istore(var_slot);
 
-                    let max_slot = *next_slot;
-                    *next_slot += 1;
-                    self.compile_expression(right, code, cf, locals, next_slot)?;
-                    code.istore(max_slot);
+                        let max_slot = *next_slot;
+                        *next_slot += 1;
+                        self.compile_expression(right, code, cf, locals, next_slot)?;
+                        code.istore(max_slot);
 
-                    let loop_start = code.bytes.len();
-                    code.iload(var_slot);
-                    code.iload(max_slot);
-                    let exit_jump = code.emit_if_icmpgt();
+                        let loop_start = code.bytes.len();
+                        code.iload(var_slot);
+                        code.iload(max_slot);
+                        let exit_jump = code.emit_if_icmpgt();
 
-                    self.compile_expression(body, code, cf, locals, next_slot)?;
+                        self.compile_expression(body, code, cf, locals, next_slot)?;
 
-                    code.iinc(var_slot, 1);
-                    code.emit_goto_target(loop_start);
-                    code.patch_jump(exit_jump);
+                        code.iinc(var_slot, 1);
+                        code.emit_goto_target(loop_start);
+                        code.patch_jump(exit_jump);
+                    } else if *op == BinaryOp::Until || *op == BinaryOp::RangeExclusive {
+                        // Integer exclusive range loop: for (i in 0 until n)
+                        self.local_types.insert(variable.name.clone(), "I".to_string());
+                        self.compile_expression(left, code, cf, locals, next_slot)?;
+                        code.istore(var_slot);
+
+                        let max_slot = *next_slot;
+                        *next_slot += 1;
+                        self.compile_expression(right, code, cf, locals, next_slot)?;
+                        code.istore(max_slot);
+
+                        let loop_start = code.bytes.len();
+                        code.iload(var_slot);
+                        code.iload(max_slot);
+                        let exit_jump = code.emit_if_icmpge();
+
+                        self.compile_expression(body, code, cf, locals, next_slot)?;
+
+                        code.iinc(var_slot, 1);
+                        code.emit_goto_target(loop_start);
+                        code.patch_jump(exit_jump);
+                    }
                 } else {
                     // Collection loop: for (item in list)
                     self.local_types.insert(variable.name.clone(), "Ljava/lang/Object;".to_string());

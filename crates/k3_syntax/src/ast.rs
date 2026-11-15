@@ -335,7 +335,7 @@ pub enum WhenCondition {
     In(Expression, bool),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -361,6 +361,16 @@ pub enum BinaryOp {
     NotIs,
     As,
     AsSafe,
+    Shl,
+    Shr,
+    Ushr,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Until,
+    DownTo,
+    Step,
+    Infix(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

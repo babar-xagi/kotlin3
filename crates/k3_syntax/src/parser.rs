@@ -80,19 +80,69 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn is_identifier_like(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::Identifier
+                | TokenKind::Value
+                | TokenKind::Data
+                | TokenKind::Get
+                | TokenKind::Set
+                | TokenKind::Field
+                | TokenKind::File
+                | TokenKind::By
+                | TokenKind::Actual
+                | TokenKind::Expect
+                | TokenKind::Constructor
+                | TokenKind::Init
+                | TokenKind::Param
+                | TokenKind::Property
+                | TokenKind::Receiver
+                | TokenKind::SetParam
+                | TokenKind::Where
+                | TokenKind::Crossinline
+                | TokenKind::Noinline
+                | TokenKind::Reified
+                | TokenKind::Dynamic
+                | TokenKind::Delegate
+                | TokenKind::Annotation
+                | TokenKind::Companion
+                | TokenKind::Const
+                | TokenKind::Lateinit
+                | TokenKind::Vararg
+                | TokenKind::Inline
+                | TokenKind::Suspend
+                | TokenKind::Override
+                | TokenKind::Operator
+                | TokenKind::Infix
+                | TokenKind::Tailrec
+                | TokenKind::External
+                | TokenKind::Sealed
+                | TokenKind::Open
+                | TokenKind::Final
+                | TokenKind::Abstract
+                | TokenKind::Public
+                | TokenKind::Private
+                | TokenKind::Protected
+                | TokenKind::Internal
+        )
+    }
+
     pub fn expect_ident(&mut self, msg: &str) -> Result<Ident, ParseError> {
-        if let Some(tok) = self.match_token(TokenKind::Identifier) {
-            let mut name = tok.text.to_string();
-            if name.starts_with('`') && name.ends_with('`') && name.len() >= 2 {
-                name = name[1..name.len() - 1].to_string();
+        if let Some(tok) = self.peek() {
+            if Self::is_identifier_like(&tok.kind) {
+                let tok = self.advance().unwrap();
+                let mut name = tok.text.to_string();
+                if name.starts_with('`') && name.ends_with('`') && name.len() >= 2 {
+                    name = name[1..name.len() - 1].to_string();
+                }
+                return Ok(Ident::new(name, tok.span));
             }
-            Ok(Ident::new(name, tok.span))
-        } else {
-            Err(ParseError {
-                message: msg.to_string(),
-                span: self.current_span(),
-            })
         }
+        Err(ParseError {
+            message: msg.to_string(),
+            span: self.current_span(),
+        })
     }
 
     // --- File & Header Parsing ---
@@ -619,10 +669,38 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            if let Some(tok) = self.match_token(TokenKind::PlusPlus) {
+                let span = lhs.span().merge(tok.span);
+                lhs = Expression::Unary {
+                    op: UnaryOp::Inc,
+                    expr: Box::new(lhs),
+                    is_prefix: false,
+                    span,
+                };
+                continue;
+            }
+
+            if let Some(tok) = self.match_token(TokenKind::MinusMinus) {
+                let span = lhs.span().merge(tok.span);
+                lhs = Expression::Unary {
+                    op: UnaryOp::Dec,
+                    expr: Box::new(lhs),
+                    is_prefix: false,
+                    span,
+                };
+                continue;
+            }
+
             // Check for trailing lambda: `foo(a) { ... }`
             if self.check(TokenKind::LBrace) && !self.is_statement_start() {
                 let lambda = self.parse_lambda()?;
                 let span = lhs.span().merge(lambda.span());
+                if let Expression::Call { ref mut trailing_lambda, .. } = lhs {
+                    if trailing_lambda.is_none() {
+                        *trailing_lambda = Some(Box::new(lambda));
+                        continue;
+                    }
+                }
                 lhs = Expression::Call {
                     callee: Box::new(lhs),
                     type_args: vec![],
@@ -642,6 +720,41 @@ impl<'a> Parser<'a> {
                 Some(k) => k,
                 None => break,
             };
+
+            // Check if it's an infix identifier (e.g. shl, shr, ushr, and, or, xor, until, downTo, step, etc.)
+            if op_kind == TokenKind::Identifier {
+                if let Some(tok) = self.peek() {
+                    let infix_op = match tok.text {
+                        "shl" => Some(BinaryOp::Shl),
+                        "shr" => Some(BinaryOp::Shr),
+                        "ushr" => Some(BinaryOp::Ushr),
+                        "and" => Some(BinaryOp::BitAnd),
+                        "or" => Some(BinaryOp::BitOr),
+                        "xor" => Some(BinaryOp::BitXor),
+                        "until" => Some(BinaryOp::Until),
+                        "downTo" => Some(BinaryOp::DownTo),
+                        "step" => Some(BinaryOp::Step),
+                        _ => None,
+                    };
+                    if let Some(bin_op) = infix_op {
+                        let left_bp = 14;
+                        let right_bp = 15;
+                        if left_bp < min_bp {
+                            break;
+                        }
+                        self.advance();
+                        let rhs = self.parse_expr_bp(right_bp)?;
+                        let span = lhs.span().merge(rhs.span());
+                        lhs = Expression::Binary {
+                            left: Box::new(lhs),
+                            op: bin_op,
+                            right: Box::new(rhs),
+                            span,
+                        };
+                        continue;
+                    }
+                }
+            }
 
             let (left_bp, right_bp, bin_op) = match Self::infix_binding_power(&op_kind) {
                 Some(tuple) => tuple,
@@ -982,7 +1095,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Expression::Super(tok.span))
             }
-            TokenKind::Identifier => {
+            k if Self::is_identifier_like(&k) => {
                 let id = self.expect_ident("expected identifier")?;
                 Ok(Expression::Identifier(id))
             }
@@ -1019,20 +1132,51 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn wrap_assignment_if_present(&mut self, target: Expression) -> Result<Expression, ParseError> {
+        let assign_op = match self.peek_kind() {
+            Some(TokenKind::Assign) => Some(AssignOp::Assign),
+            Some(TokenKind::PlusAssign) => Some(AssignOp::PlusAssign),
+            Some(TokenKind::MinusAssign) => Some(AssignOp::MinusAssign),
+            Some(TokenKind::StarAssign) => Some(AssignOp::MulAssign),
+            Some(TokenKind::SlashAssign) => Some(AssignOp::DivAssign),
+            Some(TokenKind::PercentAssign) => Some(AssignOp::ModAssign),
+            _ => None,
+        };
+
+        if let Some(op) = assign_op {
+            self.advance();
+            let value = self.parse_expression()?;
+            let span = target.span().merge(value.span());
+            Ok(Expression::Block(
+                vec![Statement::Assignment {
+                    target,
+                    op,
+                    value,
+                    span,
+                }],
+                span,
+            ))
+        } else {
+            Ok(target)
+        }
+    }
+
     pub fn parse_if(&mut self) -> Result<Expression, ParseError> {
         let if_tok = self.expect(TokenKind::If, "expected 'if'")?;
         self.expect(TokenKind::LParen, "expected '(' after 'if'")?;
         let condition = self.parse_expression()?;
         self.expect(TokenKind::RParen, "expected ')' after condition")?;
 
-        let then_branch = self.parse_expression()?;
+        let then_expr = self.parse_expression()?;
+        let then_branch = self.wrap_assignment_if_present(then_expr)?;
         let mut else_branch = None;
         let mut end_span = then_branch.span();
 
         if self.match_token(TokenKind::Else).is_some() {
             let else_expr = self.parse_expression()?;
-            end_span = else_expr.span();
-            else_branch = Some(Box::new(else_expr));
+            let else_final = self.wrap_assignment_if_present(else_expr)?;
+            end_span = else_final.span();
+            else_branch = Some(Box::new(else_final));
         }
 
         Ok(Expression::If {
@@ -1119,7 +1263,8 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::In, "expected 'in' after loop variable")?;
         let iterable = self.parse_expression()?;
         self.expect(TokenKind::RParen, "expected ')' after iterable")?;
-        let body = self.parse_expression()?;
+        let body_expr = self.parse_expression()?;
+        let body = self.wrap_assignment_if_present(body_expr)?;
 
         let span = for_tok.span.merge(body.span());
         Ok(Expression::For {
@@ -1135,7 +1280,8 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LParen, "expected '(' after 'while'")?;
         let condition = self.parse_expression()?;
         self.expect(TokenKind::RParen, "expected ')' after condition")?;
-        let body = self.parse_expression()?;
+        let body_expr = self.parse_expression()?;
+        let body = self.wrap_assignment_if_present(body_expr)?;
 
         let span = while_tok.span.merge(body.span());
         Ok(Expression::While {

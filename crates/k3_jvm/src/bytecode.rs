@@ -162,6 +162,95 @@ impl CodeBuilder {
         self.pop_stack(1);
     }
 
+    pub fn ishl(&mut self) {
+        self.bytes.push(0x78);
+        self.pop_stack(1);
+    }
+
+    pub fn ishr(&mut self) {
+        self.bytes.push(0x7a);
+        self.pop_stack(1);
+    }
+
+    pub fn iushr(&mut self) {
+        self.bytes.push(0x7c);
+        self.pop_stack(1);
+    }
+
+    pub fn iand(&mut self) {
+        self.bytes.push(0x7e);
+        self.pop_stack(1);
+    }
+
+    pub fn ior(&mut self) {
+        self.bytes.push(0x80);
+        self.pop_stack(1);
+    }
+
+    pub fn ixor(&mut self) {
+        self.bytes.push(0x82);
+        self.pop_stack(1);
+    }
+
+    pub fn lshl(&mut self) {
+        self.bytes.push(0x79);
+        self.pop_stack(1);
+    }
+
+    pub fn lshr(&mut self) {
+        self.bytes.push(0x7b);
+        self.pop_stack(1);
+    }
+
+    pub fn lushr(&mut self) {
+        self.bytes.push(0x7d);
+        self.pop_stack(1);
+    }
+
+    pub fn land(&mut self) {
+        self.bytes.push(0x7f);
+        self.pop_stack(2);
+    }
+
+    pub fn lor(&mut self) {
+        self.bytes.push(0x81);
+        self.pop_stack(2);
+    }
+
+    pub fn lxor(&mut self) {
+        self.bytes.push(0x83);
+        self.pop_stack(2);
+    }
+
+    pub fn iaload(&mut self) {
+        self.bytes.push(0x2e);
+        self.pop_stack(1);
+    }
+
+    pub fn iastore(&mut self) {
+        self.bytes.push(0x4f);
+        self.pop_stack(3);
+    }
+
+    pub fn baload(&mut self) {
+        self.bytes.push(0x33);
+        self.pop_stack(1);
+    }
+
+    pub fn bastore(&mut self) {
+        self.bytes.push(0x54);
+        self.pop_stack(3);
+    }
+
+    pub fn arraylength(&mut self) {
+        self.bytes.push(0xbe);
+    }
+
+    pub fn newarray(&mut self, atype: u8) {
+        self.bytes.push(0xbc);
+        self.bytes.push(atype);
+    }
+
     pub fn getstatic(&mut self, cp_index: u16) {
         self.bytes.push(0xb2);
         self.bytes.extend_from_slice(&cp_index.to_be_bytes());

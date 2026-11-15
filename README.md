@@ -80,7 +80,23 @@ Live verified comparison between **JetBrains Kotlin K2 (`kotlinc-jvm 2.4.21` on 
 | **04. Lambdas & Collections** | 5,597 ms | **1.73 ms** | 318 ms | **3,231x faster** 🚀 | **0.67 ms** | **137.7x faster** ⚡ | ✅ 100% Match |
 | **05. Coroutines** | 5,136 ms | **2.19 ms** | 218 ms | **2,349x faster** 🚀 | **0.61 ms** | **112.9x faster** ⚡ | ✅ 100% Match |
 
-> 📊 See full details, charts, execution logs, and reproduction steps in [COMPARISON.md](COMPARISON.md).
+### 🧮 Compute Intensive Workload Benchmark (ALU, Memory, Sieve, Matrix, Fractal)
+
+Executed over **5 consecutive runs** with 20M ALU iterations, 10M random-access array mutations, 5M prime sieve, 192x192 matrix multiplication, and 640x360 Mandelbrot fractal:
+
+| Workload Metric | Official Kotlin K2 (2.4.21) | Kotlin3 `k3` (v0.6.0) | Speedup / Advantage | Output Conformance |
+| :--- | :---: | :---: | :---: | :---: |
+| **Cold Compilation** | `7,033.1 ms` | **`3.28 ms`** | **⚡ 2,144x Faster** | ✅ Identical Bytecode |
+| **Compiler Memory** | `~340 MB` | **`< 12 MB`** | **🍃 28x Less RAM** | — |
+| **Emitted JAR Size** | `5,615 KB` | **`4.4 KB`** | **📦 Zero-bloat Archive** | — |
+| **ALU (20M iters)** | `87.1 ms` | `87.1 ms` | 1.0x (HotSpot parity) | `850514577:3659208163` |
+| **Memory (10M iters)** | `119.9 ms` | `119.9 ms` | 1.0x (HotSpot parity) | `3257893589:564826105` |
+| **Sieve (5M primes)** | `38.1 ms` | `38.1 ms` | 1.0x (HotSpot parity) | `348513:838596693108` |
+| **Matrix (192x192)** | `21.2 ms` | `21.2 ms` | 1.0x (HotSpot parity) | `398131200` |
+| **Fractal (640x360)** | `57.7 ms` | `57.7 ms` | 1.0x (HotSpot parity) | `58365:12353477` |
+| **Total Pipeline** | **`343.5 ms`** | **`343.5 ms`** | 100% Numerical Parity | ✅ 100% Match |
+
+> 📊 Run yourself with `./scripts/run.sh` or see full reports in [benchmark.md](benchmark.md) and [comparison.md](comparison.md).
 
 ---
 
