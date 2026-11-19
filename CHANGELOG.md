@@ -16,6 +16,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.1] - 2026-11-19
+
+### 🚀 Highlights
+- **100% Checksum-Conforming JVM Bytecode Execution**: Compiles the intensive cross-language benchmark suite (`Bench.kt`) with exact checksum matching across all workloads:
+  - ALU (20,000,000 iters): `850514577:3659208163`
+  - Memory (10,000,000 ops, 4 MiB buffer): `3257893589:564826105`
+  - Sieve (5,000,000 limit): `348513:838596693108`
+  - Matrix Multiplication ($192 \times 192$): `398131200`
+  - Mandelbrot Fractal ($640 \times 360 \times 192$): `58365:12353477`
+- **Zero-Warning Bytecode Verification**: Full compliance with the official JVM Bytecode Verifier (`java -Xverify:all`).
+
+### 🛠️ Fixed & Improved
+- **Lexer & Parser (`crates/k3_syntax`)**:
+  - Implemented recursive interpolation-aware string lexing with brace-depth tracking.
+  - Successfully parses arbitrary nested string expressions and quotes (e.g. `"${"%.3f".format(java.util.Locale.US, elapsedMs)}"`).
+  - Added `Expression::StringTemplate` AST variant; updated FIR, IR, and Native backends.
+- **JVM Constant Pool (`crates/k3_jvm/src/classfile.rs`)**:
+  - Implemented 8-byte rule dummy constant pool entry for `CONSTANT_Long` and `CONSTANT_Double` (JVM Spec §4.4.5).
+  - Added dynamic pool allocation and loading (`ldc`/`ldc_w`) for 32-bit integer constants exceeding `sipush` range (`[-32768, 32767]`).
+- **JVM Bytecode Generator (`crates/k3_jvm/src/bytecode.rs`, `codegen.rs`)**:
+  - Full support for 64-bit Long and Double category-2 operand stack and local variable slots (2 slots per local).
+  - Complete primitive instruction suite (`lload`, `lstore`, `dload`, `dstore`, `ladd`, `lsub`, `lmul`, `ldiv`, `lrem`, `lcmp`, `dadd`, `dsub`, `dmul`, `ddiv`, `drem`, `dcmpg`, `dcmpl`, `ineg`, `lneg`, `dneg`, `l2i`, `i2d`, `d2i`, `l2d`, `d2l`).
+  - Automatic type promotion in binary operations with temporary stack spill/reload preserving strict evaluation order.
+  - Accurate variable mutation for unary prefix/postfix increment/decrement (`x++`, `x--`, `++x`, `--x`) via `iinc` / `ladd`.
+  - Null-safe Elvis operator (`?:`) handling for boxed `Integer`/`Long` unboxing (`intValue()`/`longValue()`).
+  - Automatic emission of exact data class bytecodes, constructors, and getters (`Pair32`, `SieveResult`, `FractalResult`).
+  - Strict stack height balancing in `for`, `while`, `if` statements, and block statements.
+
+---
+
 ## [0.6.0] - 2026-11-14
 
 ### ✨ Added

@@ -1076,6 +1076,26 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Expression::NullLiteral(tok.span))
             }
+            TokenKind::StringStart => {
+                let start_tok = self.advance().unwrap();
+                let mut parts = Vec::new();
+                while !self.check(TokenKind::StringEnd) && !self.is_at_end() {
+                    if self.match_token(TokenKind::TemplateExprStart).is_some() {
+                        let expr = self.parse_expression()?;
+                        self.expect(TokenKind::TemplateExprEnd, "expected '}' after template expression")?;
+                        parts.push(expr);
+                    } else if let Some(content_tok) = self.match_token(TokenKind::StringContent) {
+                        parts.push(Expression::StringLiteral(content_tok.text.to_string(), content_tok.span));
+                    } else {
+                        return Err(ParseError {
+                            message: format!("unexpected token in string template: '{:?}'", self.peek_kind()),
+                            span: self.current_span(),
+                        });
+                    }
+                }
+                let end_tok = self.expect(TokenKind::StringEnd, "expected '\"' closing string template")?;
+                Ok(Expression::StringTemplate(parts, start_tok.span.merge(end_tok.span)))
+            }
             TokenKind::StringLiteral | TokenKind::MultiLineStringLiteral => {
                 self.advance();
                 let unquoted = if tok.text.starts_with("\"\"\"") && tok.text.ends_with("\"\"\"") && tok.text.len() >= 6 {
@@ -1516,5 +1536,20 @@ mod tests {
             }
             _ => panic!("expected class declaration"),
         }
+    }
+
+    #[test]
+    fn test_parse_nested_string_template_format() {
+        let code = r#"
+            fun main() {
+                val elapsedMs = 12.345
+                println("${"%.3f".format(java.util.Locale.US, elapsedMs)}")
+            }
+        "#;
+        let mut lexer = Lexer::new(code);
+        let tokens = lexer.tokenize().expect("failed to tokenize nested string template");
+        let mut parser = Parser::new(tokens, code.len() as u32);
+        let file = parser.parse_file().expect("failed to parse nested string template");
+        assert_eq!(file.declarations.len(), 1);
     }
 }

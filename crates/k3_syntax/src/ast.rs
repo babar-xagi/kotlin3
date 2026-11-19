@@ -213,6 +213,7 @@ pub enum Expression {
     FloatLiteral(f64, Span),
     BooleanLiteral(bool, Span),
     StringLiteral(String, Span),
+    StringTemplate(Vec<Expression>, Span),
     NullLiteral(Span),
     Identifier(Ident),
     This(Span),
@@ -292,6 +293,7 @@ impl Expression {
             | Expression::FloatLiteral(_, s)
             | Expression::BooleanLiteral(_, s)
             | Expression::StringLiteral(_, s)
+            | Expression::StringTemplate(_, s)
             | Expression::NullLiteral(s)
             | Expression::This(s)
             | Expression::Super(s)

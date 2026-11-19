@@ -3,36 +3,149 @@ use crate::classfile::{ClassFile, CodeAttr};
 use k3_syntax::ast::*;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExprType {
-    Int,
-    Long,
-    Object,
-    Void,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JvmType {
+    Int,            // I (also Boolean, Byte, Short, Char)
+    Long,           // J (2 slots, category 2)
+    Float,          // F (1 slot)
+    Double,         // D (2 slots, category 2)
+    Object(String), // L...; or [...]
+    Void,           // V
+}
+
+impl JvmType {
+    pub fn descriptor(&self) -> String {
+        match self {
+            JvmType::Int => "I".to_string(),
+            JvmType::Long => "J".to_string(),
+            JvmType::Float => "F".to_string(),
+            JvmType::Double => "D".to_string(),
+            JvmType::Object(desc) => desc.clone(),
+            JvmType::Void => "V".to_string(),
+        }
+    }
+
+    pub fn slots(&self) -> u16 {
+        match self {
+            JvmType::Long | JvmType::Double => 2,
+            JvmType::Void => 0,
+            _ => 1,
+        }
+    }
+
+    pub fn emit_load(&self, code: &mut CodeBuilder, slot: u16) {
+        match self {
+            JvmType::Int => code.iload(slot),
+            JvmType::Long => code.lload(slot),
+            JvmType::Float => code.fload(slot),
+            JvmType::Double => code.dload(slot),
+            JvmType::Object(_) => code.aload(slot),
+            JvmType::Void => {}
+        }
+    }
+
+    pub fn emit_store(&self, code: &mut CodeBuilder, slot: u16) {
+        match self {
+            JvmType::Int => code.istore(slot),
+            JvmType::Long => code.lstore(slot),
+            JvmType::Float => code.fstore(slot),
+            JvmType::Double => code.dstore(slot),
+            JvmType::Object(_) => code.astore(slot),
+            JvmType::Void => {}
+        }
+    }
+
+    pub fn emit_return(&self, code: &mut CodeBuilder) {
+        match self {
+            JvmType::Int => code.ireturn(),
+            JvmType::Long => code.lreturn(),
+            JvmType::Float => code.ireturn(),
+            JvmType::Double => code.dreturn(),
+            JvmType::Object(_) => code.areturn(),
+            JvmType::Void => code.return_void(),
+        }
+    }
+
+    pub fn emit_pop(&self, code: &mut CodeBuilder) {
+        match self {
+            JvmType::Long | JvmType::Double => code.pop2(),
+            JvmType::Void => {}
+            _ => code.pop(),
+        }
+    }
+}
+
+pub fn type_ref_to_jvm(tr: &TypeRef, package_prefix: &str) -> JvmType {
+    match tr {
+        TypeRef::User { name, .. } => {
+            let n = name.to_string();
+            match n.as_str() {
+                "Int" => JvmType::Int,
+                "Long" => JvmType::Long,
+                "Boolean" => JvmType::Int,
+                "Byte" => JvmType::Int,
+                "Short" => JvmType::Int,
+                "Char" => JvmType::Int,
+                "Float" => JvmType::Float,
+                "Double" => JvmType::Double,
+                "String" => JvmType::Object("Ljava/lang/String;".to_string()),
+                "Unit" => JvmType::Void,
+                "IntArray" => JvmType::Object("[I".to_string()),
+                "ByteArray" => JvmType::Object("[B".to_string()),
+                "LongArray" => JvmType::Object("[J".to_string()),
+                "DoubleArray" => JvmType::Object("[D".to_string()),
+                "Any" => JvmType::Object("Ljava/lang/Object;".to_string()),
+                _ => JvmType::Object(format!("L{}{};", package_prefix, n)),
+            }
+        }
+        TypeRef::Nullable { inner, .. } => type_ref_to_jvm(inner, package_prefix),
+        TypeRef::Function { .. } => JvmType::Object("Ljava/lang/Object;".to_string()),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionSignature {
+    pub param_types: Vec<JvmType>,
+    pub return_type: JvmType,
+    pub is_inline: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassInfo {
+    pub internal_name: String,
+    pub fields: Vec<(String, JvmType)>,
+    pub constructor_params: Vec<JvmType>,
+}
+
+fn emit_iconst(code: &mut CodeBuilder, cf: &mut ClassFile, val: i32) {
+    if (-32768..=32767).contains(&val) {
+        code.iconst(val);
+    } else {
+        let idx = cf.cp.add_integer(val);
+        code.ldc(idx);
+    }
 }
 
 pub struct Codegen {
     pub classes: Vec<(String, ClassFile)>,
-    pub current_ret_desc: String,
-    pub current_facade_name: String,
     pub current_package_prefix: String,
-    pub current_class_name: String,
-    pub is_in_class: bool,
-    pub current_class_fields: Vec<String>,
-    pub local_types: HashMap<String, String>,
+    pub current_facade_name: String,
+    pub current_ret_type: JvmType,
+    pub functions: HashMap<String, FunctionSignature>,
+    pub class_infos: HashMap<String, ClassInfo>,
+    pub top_level_constants: HashMap<String, (i64, JvmType)>,
 }
 
 impl Codegen {
     pub fn new() -> Self {
         Self {
             classes: Vec::new(),
-            current_ret_desc: String::new(),
-            current_facade_name: String::new(),
             current_package_prefix: String::new(),
-            current_class_name: String::new(),
-            is_in_class: false,
-            current_class_fields: Vec::new(),
-            local_types: HashMap::new(),
+            current_facade_name: String::new(),
+            current_ret_type: JvmType::Void,
+            functions: HashMap::new(),
+            class_infos: HashMap::new(),
+            top_level_constants: HashMap::new(),
         }
     }
 
@@ -56,10 +169,88 @@ impl Codegen {
         let facade_class_name = format!("{}{}", package_prefix, class_base);
         self.current_facade_name = facade_class_name.clone();
 
+        // Phase 1: Index all classes, top-level constants and functions
+        for decl in &file.declarations {
+            match decl {
+                Declaration::Class(c) => {
+                    let internal_name = format!("{}{}", package_prefix, c.name.name);
+                    let mut fields = Vec::new();
+                    let mut constructor_params = Vec::new();
+                    if let Some(params) = &c.primary_constructor_params {
+                        for p in params {
+                            let ty = type_ref_to_jvm(&p.type_ref, &package_prefix);
+                            fields.push((p.name.name.clone(), ty.clone()));
+                            constructor_params.push(ty);
+                        }
+                    }
+                    self.class_infos.insert(
+                        c.name.name.clone(),
+                        ClassInfo {
+                            internal_name,
+                            fields,
+                            constructor_params,
+                        },
+                    );
+                }
+                Declaration::Property(p) => {
+                    // Check top-level const val ONE = 1L shl 16 (or integer/long literal)
+                    if let Some(init) = &p.initializer {
+                        if let Some(val) = self.eval_const_int(init) {
+                            let ty = p.type_ref.as_ref()
+                                .map(|tr| type_ref_to_jvm(tr, &package_prefix))
+                                .unwrap_or(JvmType::Long);
+                            self.top_level_constants.insert(p.name.name.clone(), (val, ty));
+                        }
+                    }
+                }
+                Declaration::Function(f) => {
+                    let is_main = f.name.name == "main";
+                    let (param_types, return_type) = if is_main {
+                        (
+                            vec![JvmType::Object("[Ljava/lang/String;".to_string())],
+                            JvmType::Void,
+                        )
+                    } else {
+                        let mut pts = Vec::new();
+                        for p in &f.value_params {
+                            pts.push(type_ref_to_jvm(&p.type_ref, &package_prefix));
+                        }
+                        let rt = f
+                            .return_type
+                            .as_ref()
+                            .map(|tr| type_ref_to_jvm(tr, &package_prefix))
+                            .unwrap_or(JvmType::Void);
+                        (pts, rt)
+                    };
+                    let is_inline = f.modifiers.contains(&Modifier::Inline);
+                    self.functions.insert(
+                        f.name.name.clone(),
+                        FunctionSignature {
+                            param_types,
+                            return_type,
+                            is_inline,
+                        },
+                    );
+                }
+            }
+        }
+
+        // Phase 2: Compile class declarations (e.g. data classes)
+        for decl in &file.declarations {
+            if let Declaration::Class(c) = decl {
+                let class_info = self.class_infos.get(&c.name.name).unwrap().clone();
+                let mut cf = ClassFile::new(&class_info.internal_name, "java/lang/Object");
+                cf.source_file = Some(source_file_name.to_string());
+                self.compile_class_declaration(c, &class_info, &mut cf)?;
+                self.classes.push((class_info.internal_name.clone(), cf));
+            }
+        }
+
+        // Phase 3: Compile facade class with top-level functions
         let mut facade = ClassFile::new(&facade_class_name, "java/lang/Object");
         facade.source_file = Some(source_file_name.to_string());
 
-        // Add default <init>() constructor
+        // Default <init>() constructor
         let mut init_code = CodeBuilder::new();
         init_code.aload(0);
         let super_init = facade.cp.add_methodref("java/lang/Object", "<init>", "()V");
@@ -76,19 +267,6 @@ impl Codegen {
             }),
         );
 
-        // Compile classes and interfaces first
-        for decl in &file.declarations {
-            if let Declaration::Class(c) = decl {
-                let class_name = format!("{}{}", package_prefix, c.name.name);
-                let super_class = "java/lang/Object";
-                let mut cf = ClassFile::new(&class_name, super_class);
-                cf.source_file = Some(source_file_name.to_string());
-                self.compile_class_declaration(c, &mut cf, &package_prefix)?;
-                self.classes.push((class_name, cf));
-            }
-        }
-
-        // Compile top-level functions into facade class
         for decl in &file.declarations {
             if let Declaration::Function(f) = decl {
                 self.compile_function(f, &mut facade)?;
@@ -107,97 +285,183 @@ impl Codegen {
         Ok(results)
     }
 
-    fn is_int_var(&self, name: &str) -> bool {
-        if let Some(t) = self.local_types.get(name) {
-            return t == "I" || t == "Z";
+    fn eval_const_int(&self, expr: &Expression) -> Option<i64> {
+        match expr {
+            Expression::IntegerLiteral(v, _) => Some(*v),
+            Expression::LongLiteral(v, _) => Some(*v),
+            Expression::Binary { left, op, right, .. } => {
+                let l = self.eval_const_int(left)?;
+                let r = self.eval_const_int(right)?;
+                match op {
+                    BinaryOp::Add => Some(l + r),
+                    BinaryOp::Sub => Some(l - r),
+                    BinaryOp::Mul => Some(l * r),
+                    BinaryOp::Div => if r != 0 { Some(l / r) } else { None },
+                    BinaryOp::Shl => Some(l << r),
+                    BinaryOp::Shr => Some(l >> r),
+                    BinaryOp::BitAnd => Some(l & r),
+                    BinaryOp::BitOr => Some(l | r),
+                    BinaryOp::BitXor => Some(l ^ r),
+                    _ => None,
+                }
+            }
+            Expression::Identifier(id) => {
+                if let Some((v, _)) = self.top_level_constants.get(&id.name) {
+                    Some(*v)
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
-        name == "count" || name == "i" || name == "age" || name == "speedMultiplier"
+    }
+
+    fn compile_class_declaration(
+        &mut self,
+        c: &ClassDeclaration,
+        info: &ClassInfo,
+        cf: &mut ClassFile,
+    ) -> Result<(), String> {
+        cf.access_flags = 0x0001 | 0x0020; // ACC_PUBLIC | ACC_SUPER
+
+        // Add fields
+        for (fname, fty) in &info.fields {
+            cf.add_field(0x0001 /* ACC_PUBLIC */, fname, &fty.descriptor());
+        }
+
+        // Add constructor <init>(...)V
+        let param_desc = info.constructor_params.iter().map(|t| t.descriptor()).collect::<Vec<_>>().join("");
+        let ctor_desc = format!("({})V", param_desc);
+        let mut init_code = CodeBuilder::new();
+        init_code.aload(0);
+        let super_init = cf.cp.add_methodref("java/lang/Object", "<init>", "()V");
+        init_code.invokespecial(super_init, 0);
+
+        let mut param_slot = 1u16;
+        for (fname, fty) in &info.fields {
+            init_code.aload(0);
+            fty.emit_load(&mut init_code, param_slot);
+            let f_idx = cf.cp.add_fieldref(&info.internal_name, fname, &fty.descriptor());
+            init_code.putfield(f_idx);
+            param_slot += fty.slots();
+        }
+        init_code.return_void();
+
+        cf.add_method(
+            0x0001, // ACC_PUBLIC
+            "<init>",
+            &ctor_desc,
+            Some(CodeAttr {
+                max_stack: 3,
+                max_locals: param_slot.max(1),
+                bytecode: init_code.bytes,
+            }),
+        );
+
+        // Add getters for properties
+        for (fname, fty) in &info.fields {
+            let getter_name = format!("get{}", capitalize_first(fname));
+            let getter_desc = format!("(){}", fty.descriptor());
+            let mut g_code = CodeBuilder::new();
+            g_code.aload(0);
+            let f_idx = cf.cp.add_fieldref(&info.internal_name, fname, &fty.descriptor());
+            g_code.getfield(f_idx);
+            fty.emit_return(&mut g_code);
+
+            cf.add_method(
+                0x0001, // ACC_PUBLIC
+                &getter_name,
+                &getter_desc,
+                Some(CodeAttr {
+                    max_stack: 1 + fty.slots(),
+                    max_locals: 1,
+                    bytecode: g_code.bytes,
+                }),
+            );
+        }
+
+        // Compile member functions if any
+        for inner in &c.declarations {
+            if let Declaration::Function(f) = inner {
+                let mut code = CodeBuilder::new();
+                let mut locals = HashMap::new();
+                locals.insert("this".to_string(), (0, JvmType::Object(format!("L{};", info.internal_name))));
+                let mut next_slot = 1u16;
+                let mut param_descs = Vec::new();
+                for p in &f.value_params {
+                    let pty = type_ref_to_jvm(&p.type_ref, &self.current_package_prefix);
+                    param_descs.push(pty.descriptor());
+                    locals.insert(p.name.name.clone(), (next_slot, pty.clone()));
+                    next_slot += pty.slots();
+                }
+                let ret_ty = f.return_type.as_ref()
+                    .map(|tr| type_ref_to_jvm(tr, &self.current_package_prefix))
+                    .unwrap_or(JvmType::Void);
+                self.current_ret_type = ret_ty.clone();
+
+                let mut breaks = Vec::new();
+                if let Some(body) = &f.body {
+                    match body {
+                        FunctionBody::Block(stmts) => {
+                            for s in stmts {
+                                self.compile_statement(s, &mut code, cf, &mut locals, &mut next_slot, &mut breaks)?;
+                            }
+                            ret_ty.emit_return(&mut code);
+                        }
+                        FunctionBody::Expression(e) => {
+                            let ety = self.compile_expression(e, &mut code, cf, &mut locals, &mut next_slot, &mut breaks)?;
+                            if ret_ty == JvmType::Long && ety == JvmType::Int {
+                                code.i2l();
+                            }
+                            ret_ty.emit_return(&mut code);
+                        }
+                    }
+                } else {
+                    ret_ty.emit_return(&mut code);
+                }
+
+                let m_desc = format!("({}){}", param_descs.join(""), ret_ty.descriptor());
+                cf.add_method(
+                    0x0001,
+                    &f.name.name,
+                    &m_desc,
+                    Some(CodeAttr {
+                        max_stack: code.max_stack.max(4),
+                        max_locals: code.max_locals.max(next_slot).max(1),
+                        bytecode: code.bytes,
+                    }),
+                );
+            }
+        }
+
+        Ok(())
     }
 
     fn compile_function(&mut self, f: &NamedFunction, cf: &mut ClassFile) -> Result<(), String> {
         let is_main = f.name.name == "main";
-        let descriptor = if is_main {
-            "([Ljava/lang/String;)V".to_string()
-        } else {
-            let ret_desc = match &f.return_type {
-                Some(TypeRef::User { name, .. }) => {
-                    let n = name.to_string();
-                    match n.as_str() {
-                        "Int" => "I",
-                        "Long" => "J",
-                        "Boolean" => "Z",
-                        "String" => "Ljava/lang/String;",
-                        "Unit" => "V",
-                        _ => "Ljava/lang/Object;",
-                    }
-                }
-                _ => "V",
-            };
+        let sig = self.functions.get(&f.name.name).unwrap().clone();
+        self.current_ret_type = sig.return_type.clone();
 
-            let mut param_descs = String::new();
-            if let Some(recv) = &f.receiver_type {
-                let rdesc = match recv {
-                    TypeRef::User { .. } => "Ljava/util/List;",
-                    _ => "Ljava/lang/Object;",
-                };
-                param_descs.push_str(rdesc);
-            }
-
-            for p in &f.value_params {
-                let pdesc = match &p.type_ref {
-                    TypeRef::User { name, .. } => {
-                        let n = name.to_string();
-                        match n.as_str() {
-                            "Int" => "I",
-                            "Long" => "J",
-                            "Boolean" => "Z",
-                            "String" => "Ljava/lang/String;",
-                            "Any" => "Ljava/lang/Object;",
-                            _ => "Ljava/lang/Object;",
-                        }
-                    }
-                    _ => "Ljava/lang/Object;",
-                };
-                param_descs.push_str(pdesc);
-            }
-            format!("({}){}", param_descs, ret_desc)
-        };
-
-        self.current_ret_desc = descriptor.clone();
+        let param_desc = sig.param_types.iter().map(|t| t.descriptor()).collect::<Vec<_>>().join("");
+        let descriptor = format!("({}){}", param_desc, sig.return_type.descriptor());
 
         let mut code = CodeBuilder::new();
         let mut locals = HashMap::new();
         let mut next_slot = 0u16;
 
         if is_main {
-            locals.insert("args".to_string(), 0);
-            self.local_types.insert("args".to_string(), "[Ljava/lang/String;".to_string());
+            locals.insert("args".to_string(), (0, JvmType::Object("[Ljava/lang/String;".to_string())));
             next_slot = 1;
         } else {
-            if f.receiver_type.is_some() {
-                locals.insert("this".to_string(), next_slot);
-                self.local_types.insert("this".to_string(), "Ljava/util/List;".to_string());
-                next_slot += 1;
-            }
-            for p in &f.value_params {
-                locals.insert(p.name.name.clone(), next_slot);
-                let pdesc = match &p.type_ref {
-                    TypeRef::User { name, .. } => {
-                        let n = name.to_string();
-                        match n.as_str() {
-                            "Int" => "I",
-                            "Long" => "J",
-                            "Boolean" => "Z",
-                            "String" => "Ljava/lang/String;",
-                            _ => "Ljava/lang/Object;",
-                        }
-                    }
-                    _ => "Ljava/lang/Object;",
-                };
-                self.local_types.insert(p.name.name.clone(), pdesc.to_string());
-                next_slot += 1;
+            for (idx, p) in f.value_params.iter().enumerate() {
+                let pty = sig.param_types[idx].clone();
+                let slot = next_slot;
+                next_slot += pty.slots();
+                locals.insert(p.name.name.clone(), (slot, pty));
             }
         }
+
+        let mut breaks = Vec::new();
 
         if let Some(body) = &f.body {
             match body {
@@ -207,38 +471,22 @@ impl Codegen {
                         if let Statement::Expression(Expression::Return { .. }) = stmt {
                             has_returned = true;
                         }
-                        self.compile_statement(stmt, &mut code, cf, &mut locals, &mut next_slot)?;
+                        self.compile_statement(stmt, &mut code, cf, &mut locals, &mut next_slot, &mut breaks)?;
                     }
                     if !has_returned {
-                        if descriptor.ends_with('V') {
-                            code.return_void();
-                        } else if descriptor.ends_with('I') || descriptor.ends_with('Z') {
-                            code.iconst(0);
-                            code.ireturn();
-                        } else {
-                            code.aconst_null();
-                            code.areturn();
-                        }
+                        sig.return_type.emit_return(&mut code);
                     }
                 }
                 FunctionBody::Expression(expr) => {
-                    let ty = self.compile_expression(expr, &mut code, cf, &mut locals, &mut next_slot)?;
-                    if descriptor.ends_with('J') {
-                        if ty == ExprType::Int {
-                            code.i2l();
-                        }
-                        code.lreturn();
-                    } else if descriptor.ends_with('I') || descriptor.ends_with('Z') {
-                        code.ireturn();
-                    } else if descriptor.ends_with('V') {
-                        code.return_void();
-                    } else {
-                        code.areturn();
+                    let ty = self.compile_expression(expr, &mut code, cf, &mut locals, &mut next_slot, &mut breaks)?;
+                    if sig.return_type == JvmType::Long && ty == JvmType::Int {
+                        code.i2l();
                     }
+                    sig.return_type.emit_return(&mut code);
                 }
             }
         } else {
-            code.return_void();
+            sig.return_type.emit_return(&mut code);
         }
 
         let access_flags = 0x0001 | 0x0008; // ACC_PUBLIC | ACC_STATIC
@@ -247,7 +495,7 @@ impl Codegen {
             &f.name.name,
             &descriptor,
             Some(CodeAttr {
-                max_stack: code.max_stack.max(6),
+                max_stack: code.max_stack.max(8),
                 max_locals: code.max_locals.max(next_slot).max(1),
                 bytecode: code.bytes,
             }),
@@ -261,53 +509,141 @@ impl Codegen {
         stmt: &Statement,
         code: &mut CodeBuilder,
         cf: &mut ClassFile,
-        locals: &mut HashMap<String, u16>,
+        locals: &mut HashMap<String, (u16, JvmType)>,
         next_slot: &mut u16,
+        break_targets: &mut Vec<usize>,
     ) -> Result<(), String> {
         match stmt {
             Statement::Declaration(decl) => match decl {
                 Declaration::Property(p) => {
                     let slot = *next_slot;
-                    *next_slot += 1;
-                    locals.insert(p.name.name.clone(), slot);
-
+                    let declared_ty = p.type_ref.as_ref().map(|tr| type_ref_to_jvm(tr, &self.current_package_prefix));
                     if let Some(init) = &p.initializer {
-                        let ty = self.compile_expression(init, code, cf, locals, next_slot)?;
-                        if ty == ExprType::Int {
-                            self.local_types.insert(p.name.name.clone(), "I".to_string());
-                            code.istore(slot);
-                        } else {
-                            self.local_types.insert(p.name.name.clone(), "Ljava/lang/Object;".to_string());
-                            code.astore(slot);
-                        }
+                        let init_ty = self.compile_expression(init, code, cf, locals, next_slot, break_targets)?;
+                        let actual_ty = match declared_ty {
+                            Some(JvmType::Long) if init_ty == JvmType::Int => {
+                                code.i2l();
+                                JvmType::Long
+                            }
+                            Some(d) => d,
+                            None => init_ty,
+                        };
+                        *next_slot = slot + actual_ty.slots();
+                        actual_ty.emit_store(code, slot);
+                        locals.insert(p.name.name.clone(), (slot, actual_ty));
+                    } else {
+                        let ty = declared_ty.unwrap_or(JvmType::Int);
+                        *next_slot = slot + ty.slots();
+                        locals.insert(p.name.name.clone(), (slot, ty));
                     }
                 }
                 _ => {}
             },
-            Statement::Assignment {
-                target,
-                op: _,
-                value,
-                span: _,
-            } => {
-                if let Expression::Identifier(id) = target {
-                    if let Some(&slot) = locals.get(&id.name) {
-                        let ty = self.compile_expression(value, code, cf, locals, next_slot)?;
-                        if ty == ExprType::Int {
-                            code.istore(slot);
-                        } else {
-                            code.astore(slot);
+            Statement::Assignment { target, op, value, .. } => {
+                match target {
+                    Expression::Identifier(id) => {
+                        if let Some((slot, var_ty)) = locals.get(&id.name).cloned() {
+                            match op {
+                                AssignOp::Assign => {
+                                    let val_ty = self.compile_expression(value, code, cf, locals, next_slot, break_targets)?;
+                                    if var_ty == JvmType::Long && val_ty == JvmType::Int {
+                                        code.i2l();
+                                    }
+                                    var_ty.emit_store(code, slot);
+                                }
+                                AssignOp::PlusAssign => {
+                                    var_ty.emit_load(code, slot);
+                                    let val_ty = self.compile_expression(value, code, cf, locals, next_slot, break_targets)?;
+                                    if var_ty == JvmType::Long && val_ty == JvmType::Int {
+                                        code.i2l();
+                                    }
+                                    if var_ty == JvmType::Long {
+                                        code.ladd();
+                                    } else {
+                                        code.iadd();
+                                    }
+                                    var_ty.emit_store(code, slot);
+                                }
+                                AssignOp::MinusAssign => {
+                                    var_ty.emit_load(code, slot);
+                                    let val_ty = self.compile_expression(value, code, cf, locals, next_slot, break_targets)?;
+                                    if var_ty == JvmType::Long && val_ty == JvmType::Int {
+                                        code.i2l();
+                                    }
+                                    if var_ty == JvmType::Long {
+                                        code.lsub();
+                                    } else {
+                                        code.isub();
+                                    }
+                                    var_ty.emit_store(code, slot);
+                                }
+                                AssignOp::MulAssign => {
+                                    var_ty.emit_load(code, slot);
+                                    let val_ty = self.compile_expression(value, code, cf, locals, next_slot, break_targets)?;
+                                    if var_ty == JvmType::Long && val_ty == JvmType::Int {
+                                        code.i2l();
+                                    }
+                                    if var_ty == JvmType::Long {
+                                        code.lmul();
+                                    } else {
+                                        code.imul();
+                                    }
+                                    var_ty.emit_store(code, slot);
+                                }
+                                _ => {}
+                            }
                         }
                     }
+                    Expression::IndexAccess { target: arr_expr, indices, .. } => {
+                        if let Some(idx_expr) = indices.first() {
+                            let arr_ty = self.compile_expression(arr_expr, code, cf, locals, next_slot, break_targets)?;
+                            let _ = self.compile_expression(idx_expr, code, cf, locals, next_slot, break_targets)?;
+
+                            match op {
+                                AssignOp::Assign => {
+                                    let val_ty = self.compile_expression(value, code, cf, locals, next_slot, break_targets)?;
+                                    if arr_ty == JvmType::Object("[B".to_string()) {
+                                        if val_ty == JvmType::Int {
+                                            code.bastore();
+                                        } else {
+                                            code.bastore();
+                                        }
+                                    } else if arr_ty == JvmType::Object("[J".to_string()) {
+                                        code.lastore();
+                                    } else {
+                                        code.iastore();
+                                    }
+                                }
+                                AssignOp::PlusAssign => {
+                                    // Duplicate arrayref and index on stack: [arr, idx] -> dup2 -> [arr, idx, arr, idx]
+                                    code.dup2();
+                                    if arr_ty == JvmType::Object("[B".to_string()) {
+                                        code.baload();
+                                        let _ = self.compile_expression(value, code, cf, locals, next_slot, break_targets)?;
+                                        code.iadd();
+                                        code.bastore();
+                                    } else if arr_ty == JvmType::Object("[J".to_string()) {
+                                        code.laload();
+                                        let _ = self.compile_expression(value, code, cf, locals, next_slot, break_targets)?;
+                                        code.ladd();
+                                        code.lastore();
+                                    } else {
+                                        code.iaload();
+                                        let _ = self.compile_expression(value, code, cf, locals, next_slot, break_targets)?;
+                                        code.iadd();
+                                        code.iastore();
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
             Statement::Expression(expr) => {
-                let ty = self.compile_expression(expr, code, cf, locals, next_slot)?;
-                if ty == ExprType::Int || ty == ExprType::Object {
-                    code.pop();
-                } else if ty == ExprType::Long {
-                    code.pop2();
-                }
+                let ty = self.compile_expression(expr, code, cf, locals, next_slot, break_targets)?;
+                ty.emit_pop(code);
             }
         }
         Ok(())
@@ -318,512 +654,715 @@ impl Codegen {
         expr: &Expression,
         code: &mut CodeBuilder,
         cf: &mut ClassFile,
-        locals: &mut HashMap<String, u16>,
+        locals: &mut HashMap<String, (u16, JvmType)>,
         next_slot: &mut u16,
-    ) -> Result<ExprType, String> {
+        break_targets: &mut Vec<usize>,
+    ) -> Result<JvmType, String> {
         match expr {
             Expression::IntegerLiteral(val, _) => {
-                code.iconst(*val as i32);
-                Ok(ExprType::Int)
+                emit_iconst(code, cf, *val as i32);
+                Ok(JvmType::Int)
             }
             Expression::LongLiteral(val, _) => {
-                code.iconst(*val as i32);
-                code.i2l();
-                Ok(ExprType::Long)
+                if *val == 0 {
+                    code.lconst_0();
+                } else if *val == 1 {
+                    code.lconst_1();
+                } else {
+                    let idx = cf.cp.add_long(*val);
+                    code.ldc2_w(idx);
+                }
+                Ok(JvmType::Long)
+            }
+            Expression::FloatLiteral(f, _) => {
+                let idx = cf.cp.add_double(*f);
+                code.ldc2_w(idx);
+                Ok(JvmType::Double)
             }
             Expression::BooleanLiteral(b, _) => {
                 code.iconst(if *b { 1 } else { 0 });
-                Ok(ExprType::Int)
-            }
-            Expression::FloatLiteral(f, _) => {
-                let s = f.to_string();
-                let s_idx = cf.cp.add_string(&s);
-                code.ldc(s_idx);
-                let val_of = cf.cp.add_methodref(
-                    "java/lang/Double",
-                    "valueOf",
-                    "(Ljava/lang/String;)Ljava/lang/Double;",
-                );
-                code.invokestatic(val_of, 1, true);
-                Ok(ExprType::Object)
+                Ok(JvmType::Int)
             }
             Expression::StringLiteral(s, _) => {
-                if s.contains('$') {
-                    self.compile_interpolated_string(s, code, cf, locals, next_slot)?;
-                } else {
-                    let str_idx = cf.cp.add_string(s);
-                    code.ldc(str_idx);
+                let str_idx = cf.cp.add_string(s);
+                code.ldc(str_idx);
+                Ok(JvmType::Object("Ljava/lang/String;".to_string()))
+            }
+            Expression::StringTemplate(parts, _) => {
+                let sb_class = cf.cp.add_class("java/lang/StringBuilder");
+                code.new_instance(sb_class);
+                code.dup();
+                let sb_init = cf.cp.add_methodref("java/lang/StringBuilder", "<init>", "()V");
+                code.invokespecial(sb_init, 0);
+
+                for part in parts {
+                    let ty = self.compile_expression(part, code, cf, locals, next_slot, break_targets)?;
+                    let (desc, slots) = match ty {
+                        JvmType::Int => ("(I)Ljava/lang/StringBuilder;", 1),
+                        JvmType::Long => ("(J)Ljava/lang/StringBuilder;", 2),
+                        JvmType::Double => ("(D)Ljava/lang/StringBuilder;", 2),
+                        JvmType::Float => ("(F)Ljava/lang/StringBuilder;", 1),
+                        JvmType::Object(ref d) if d == "Ljava/lang/String;" => {
+                            ("(Ljava/lang/String;)Ljava/lang/StringBuilder;", 1)
+                        }
+                        _ => ("(Ljava/lang/Object;)Ljava/lang/StringBuilder;", 1),
+                    };
+                    let app_ref = cf.cp.add_methodref("java/lang/StringBuilder", "append", desc);
+                    code.invokevirtual(app_ref, slots, true);
                 }
-                Ok(ExprType::Object)
+
+                let to_string = cf.cp.add_methodref("java/lang/StringBuilder", "toString", "()Ljava/lang/String;");
+                code.invokevirtual(to_string, 0, true);
+                Ok(JvmType::Object("Ljava/lang/String;".to_string()))
             }
             Expression::NullLiteral(_) => {
                 code.aconst_null();
-                Ok(ExprType::Object)
+                Ok(JvmType::Object("Ljava/lang/Object;".to_string()))
             }
             Expression::This(_) => {
                 code.aload(0);
-                Ok(ExprType::Object)
+                Ok(JvmType::Object("Ljava/lang/Object;".to_string()))
             }
             Expression::Identifier(id) => {
-                if let Some(&slot) = locals.get(&id.name) {
-                    if self.is_int_var(&id.name) {
-                        code.iload(slot);
-                        Ok(ExprType::Int)
+                if let Some((slot, ty)) = locals.get(&id.name).cloned() {
+                    ty.emit_load(code, slot);
+                    Ok(ty)
+                } else if let Some((cval, cty)) = self.top_level_constants.get(&id.name).cloned() {
+                    if cty == JvmType::Long {
+                        if cval == 0 {
+                            code.lconst_0();
+                        } else if cval == 1 {
+                            code.lconst_1();
+                        } else {
+                            let idx = cf.cp.add_long(cval);
+                            code.ldc2_w(idx);
+                        }
+                        Ok(JvmType::Long)
                     } else {
-                        code.aload(slot);
-                        Ok(ExprType::Object)
+                        emit_iconst(code, cf, cval as i32);
+                        Ok(JvmType::Int)
                     }
-                } else if self.is_in_class && self.current_class_fields.contains(&id.name) {
-                    code.aload(0);
-                    let f_idx = cf.cp.add_fieldref(&self.current_class_name, &id.name, "Ljava/lang/String;");
-                    code.getfield(f_idx);
-                    Ok(ExprType::Object)
+                } else if id.name == "System" {
+                    Ok(JvmType::Object("Ljava/lang/System;".to_string()))
+                } else if id.name == "Math" {
+                    Ok(JvmType::Object("Ljava/lang/Math;".to_string()))
                 } else {
                     code.aconst_null();
-                    Ok(ExprType::Object)
+                    Ok(JvmType::Object("Ljava/lang/Object;".to_string()))
                 }
             }
             Expression::Binary { left, op, right, .. } => {
-                let left_ty = self.compile_expression(left, code, cf, locals, next_slot)?;
-                let right_ty = self.compile_expression(right, code, cf, locals, next_slot)?;
+                if *op == BinaryOp::Elvis {
+                    // Left ?: Right
+                    let left_ty = self.compile_expression(left, code, cf, locals, next_slot, break_targets)?;
+                    code.dup();
+                    let not_null_jump = code.emit_ifnonnull();
+                    code.pop();
+                    let right_ty = self.compile_expression(right, code, cf, locals, next_slot, break_targets)?;
+                    let end_jump = code.emit_goto();
+                    code.patch_jump(not_null_jump);
+                    if left_ty == JvmType::Object("Ljava/lang/Integer;".to_string()) {
+                        let int_val = cf.cp.add_methodref("java/lang/Integer", "intValue", "()I");
+                        code.invokevirtual(int_val, 0, false);
+                        code.patch_jump(end_jump);
+                        return Ok(JvmType::Int);
+                    } else if left_ty == JvmType::Object("Ljava/lang/Long;".to_string()) {
+                        let long_val = cf.cp.add_methodref("java/lang/Long", "longValue", "()J");
+                        code.invokevirtual(long_val, 0, false);
+                        code.patch_jump(end_jump);
+                        return Ok(JvmType::Long);
+                    }
+                    code.patch_jump(end_jump);
+                    return Ok(if left_ty != JvmType::Void { left_ty } else { right_ty });
+                }
 
-                if left_ty == ExprType::Int && right_ty == ExprType::Int {
-                    match op {
-                        BinaryOp::Add => code.iadd(),
-                        BinaryOp::Sub => code.isub(),
-                        BinaryOp::Mul => code.imul(),
-                        BinaryOp::Div => code.idiv(),
-                        BinaryOp::Mod => code.irem(),
-                        BinaryOp::Shl => code.ishl(),
-                        BinaryOp::Shr => code.ishr(),
-                        BinaryOp::Ushr => code.iushr(),
-                        BinaryOp::BitAnd => code.iand(),
-                        BinaryOp::BitOr => code.ior(),
-                        BinaryOp::BitXor => code.ixor(),
-                        _ => {}
+                let left_ty = self.compile_expression(left, code, cf, locals, next_slot, break_targets)?;
+                let is_shift = matches!(op, BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Ushr);
+                let right_ty = self.compile_expression(right, code, cf, locals, next_slot, break_targets)?;
+
+                if is_shift {
+                    // For shifts, right MUST be Int
+                    if right_ty == JvmType::Long {
+                        code.l2i();
+                    } else if right_ty == JvmType::Double {
+                        code.d2i();
                     }
-                    Ok(ExprType::Int)
-                } else if left_ty == ExprType::Long || right_ty == ExprType::Long {
-                    match op {
-                        BinaryOp::Shl => code.lshl(),
-                        BinaryOp::Shr => code.lshr(),
-                        BinaryOp::Ushr => code.lushr(),
-                        BinaryOp::BitAnd => code.land(),
-                        BinaryOp::BitOr => code.lor(),
-                        BinaryOp::BitXor => code.lxor(),
-                        _ => {}
+                    if left_ty == JvmType::Long {
+                        match op {
+                            BinaryOp::Shl => { code.lshl(); Ok(JvmType::Long) }
+                            BinaryOp::Shr => { code.lshr(); Ok(JvmType::Long) }
+                            BinaryOp::Ushr => { code.lushr(); Ok(JvmType::Long) }
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        match op {
+                            BinaryOp::Shl => { code.ishl(); Ok(JvmType::Int) }
+                            BinaryOp::Shr => { code.ishr(); Ok(JvmType::Int) }
+                            BinaryOp::Ushr => { code.iushr(); Ok(JvmType::Int) }
+                            _ => unreachable!(),
+                        }
                     }
-                    Ok(ExprType::Long)
                 } else {
-                    Ok(ExprType::Object)
+                    let target_ty = if left_ty == JvmType::Double || right_ty == JvmType::Double {
+                        JvmType::Double
+                    } else if left_ty == JvmType::Long || right_ty == JvmType::Long {
+                        JvmType::Long
+                    } else {
+                        JvmType::Int
+                    };
+
+                    // Stack has: [left (left_ty), right (right_ty)]
+                    if left_ty != target_ty {
+                        // right is on top of left, so save right to a temporary slot
+                        let temp_slot = *next_slot;
+                        *next_slot += match right_ty {
+                            JvmType::Long | JvmType::Double => 2,
+                            _ => 1,
+                        };
+                        match right_ty {
+                            JvmType::Double => code.dstore(temp_slot),
+                            JvmType::Long => code.lstore(temp_slot),
+                            JvmType::Int => code.istore(temp_slot),
+                            _ => code.astore(temp_slot),
+                        }
+                        // Now left is on top: convert left to target_ty
+                        match (&left_ty, &target_ty) {
+                            (JvmType::Long, JvmType::Double) => code.l2d(),
+                            (JvmType::Int, JvmType::Double) => code.i2d(),
+                            (JvmType::Int, JvmType::Long) => code.i2l(),
+                            _ => {}
+                        }
+                        // Reload right
+                        match right_ty {
+                            JvmType::Double => code.dload(temp_slot),
+                            JvmType::Long => code.lload(temp_slot),
+                            JvmType::Int => code.iload(temp_slot),
+                            _ => code.aload(temp_slot),
+                        }
+                        // Convert right if needed
+                        match (&right_ty, &target_ty) {
+                            (JvmType::Long, JvmType::Double) => code.l2d(),
+                            (JvmType::Int, JvmType::Double) => code.i2d(),
+                            (JvmType::Int, JvmType::Long) => code.i2l(),
+                            _ => {}
+                        }
+                    } else if right_ty != target_ty {
+                        // left is already target_ty, right is on top, convert right directly
+                        match (&right_ty, &target_ty) {
+                            (JvmType::Long, JvmType::Double) => code.l2d(),
+                            (JvmType::Int, JvmType::Double) => code.i2d(),
+                            (JvmType::Int, JvmType::Long) => code.i2l(),
+                            _ => {}
+                        }
+                    }
+
+                    match target_ty {
+                        JvmType::Double => match op {
+                            BinaryOp::Add => { code.dadd(); Ok(JvmType::Double) }
+                            BinaryOp::Sub => { code.dsub(); Ok(JvmType::Double) }
+                            BinaryOp::Mul => { code.dmul(); Ok(JvmType::Double) }
+                            BinaryOp::Div => { code.ddiv(); Ok(JvmType::Double) }
+                            BinaryOp::Mod => { code.drem(); Ok(JvmType::Double) }
+                            BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Less | BinaryOp::LessEq | BinaryOp::Greater | BinaryOp::GreaterEq => {
+                                code.dcmpg();
+                                let jump = match op {
+                                    BinaryOp::Eq => code.emit_ifeq(),
+                                    BinaryOp::NotEq => code.emit_ifne(),
+                                    BinaryOp::Less => code.emit_iflt(),
+                                    BinaryOp::LessEq => code.emit_ifle(),
+                                    BinaryOp::Greater => code.emit_ifgt(),
+                                    BinaryOp::GreaterEq => code.emit_ifge(),
+                                    _ => unreachable!(),
+                                };
+                                code.iconst(0);
+                                let end_j = code.emit_goto();
+                                code.patch_jump(jump);
+                                code.iconst(1);
+                                code.patch_jump(end_j);
+                                Ok(JvmType::Int)
+                            }
+                            _ => Ok(JvmType::Double),
+                        },
+                        JvmType::Long => match op {
+                            BinaryOp::Add => { code.ladd(); Ok(JvmType::Long) }
+                            BinaryOp::Sub => { code.lsub(); Ok(JvmType::Long) }
+                            BinaryOp::Mul => { code.lmul(); Ok(JvmType::Long) }
+                            BinaryOp::Div => { code.ldiv(); Ok(JvmType::Long) }
+                            BinaryOp::Mod => { code.lrem(); Ok(JvmType::Long) }
+                            BinaryOp::BitAnd => { code.land(); Ok(JvmType::Long) }
+                            BinaryOp::BitOr => { code.lor(); Ok(JvmType::Long) }
+                            BinaryOp::BitXor => { code.lxor(); Ok(JvmType::Long) }
+                            BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Less | BinaryOp::LessEq | BinaryOp::Greater | BinaryOp::GreaterEq => {
+                                code.lcmp();
+                                let jump = match op {
+                                    BinaryOp::Eq => code.emit_ifeq(),
+                                    BinaryOp::NotEq => code.emit_ifne(),
+                                    BinaryOp::Less => code.emit_iflt(),
+                                    BinaryOp::LessEq => code.emit_ifle(),
+                                    BinaryOp::Greater => code.emit_ifgt(),
+                                    BinaryOp::GreaterEq => code.emit_ifge(),
+                                    _ => unreachable!(),
+                                };
+                                code.iconst(0);
+                                let end_j = code.emit_goto();
+                                code.patch_jump(jump);
+                                code.iconst(1);
+                                code.patch_jump(end_j);
+                                Ok(JvmType::Int)
+                            }
+                            _ => Ok(JvmType::Long),
+                        },
+                        _ => match op {
+                            BinaryOp::Add => { code.iadd(); Ok(JvmType::Int) }
+                            BinaryOp::Sub => { code.isub(); Ok(JvmType::Int) }
+                            BinaryOp::Mul => { code.imul(); Ok(JvmType::Int) }
+                            BinaryOp::Div => { code.idiv(); Ok(JvmType::Int) }
+                            BinaryOp::Mod => { code.irem(); Ok(JvmType::Int) }
+                            BinaryOp::BitAnd => { code.iand(); Ok(JvmType::Int) }
+                            BinaryOp::BitOr => { code.ior(); Ok(JvmType::Int) }
+                            BinaryOp::BitXor => { code.ixor(); Ok(JvmType::Int) }
+                            BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Less | BinaryOp::LessEq | BinaryOp::Greater | BinaryOp::GreaterEq => {
+                                let jump = match op {
+                                    BinaryOp::Eq => code.emit_if_icmpeq(),
+                                    BinaryOp::NotEq => code.emit_if_icmpne(),
+                                    BinaryOp::Less => code.emit_if_icmplt(),
+                                    BinaryOp::LessEq => code.emit_if_icmple(),
+                                    BinaryOp::Greater => code.emit_if_icmpgt(),
+                                    BinaryOp::GreaterEq => code.emit_if_icmpge(),
+                                    _ => unreachable!(),
+                                };
+                                code.iconst(0);
+                                let end_j = code.emit_goto();
+                                code.patch_jump(jump);
+                                code.iconst(1);
+                                code.patch_jump(end_j);
+                                Ok(JvmType::Int)
+                            }
+                            _ => Ok(JvmType::Int),
+                        },
+                    }
                 }
             }
-            Expression::Call {
-                callee,
-                type_args: _,
-                args,
-                trailing_lambda: _,
-                span: _,
-            } => {
-                // Check if call is on a MemberAccess like member.printDetails() or evens.map(...)
-                if let Expression::MemberAccess { target, member, .. } = &**callee {
-                    if member.name == "printDetails" {
-                        self.compile_expression(target, code, cf, locals, next_slot)?;
-                        let class_name = format!("{}Developer", self.current_package_prefix);
-                        let dev_class = cf.cp.add_class(&class_name);
-                        code.checkcast(dev_class);
-                        let m_ref = cf.cp.add_methodref(
-                            &class_name,
-                            "printDetails",
-                            "()V",
-                        );
-                        code.invokevirtual(m_ref, 0, false);
-                        return Ok(ExprType::Void);
-                    } else if member.name == "add" {
-                        self.compile_expression(target, code, cf, locals, next_slot)?;
-                        if let Some(arg) = args.first() {
-                            self.compile_expression_boxed(&arg.value, code, cf, locals, next_slot)?;
+            Expression::Unary { op, expr, is_prefix, .. } => {
+                if matches!(op, UnaryOp::Inc | UnaryOp::Dec) {
+                    let delta: i8 = if *op == UnaryOp::Inc { 1 } else { -1 };
+                    if let Expression::Identifier(id) = &**expr {
+                        if let Some((slot, ty)) = locals.get(&id.name).cloned() {
+                            if ty == JvmType::Int {
+                                if *is_prefix {
+                                    code.iinc(slot, delta);
+                                    code.iload(slot);
+                                } else {
+                                    code.iload(slot);
+                                    code.iinc(slot, delta);
+                                }
+                                return Ok(JvmType::Int);
+                            } else if ty == JvmType::Long {
+                                if *is_prefix {
+                                    code.lload(slot);
+                                    code.lconst_1();
+                                    if delta > 0 { code.ladd(); } else { code.lsub(); }
+                                    code.dup2();
+                                    code.lstore(slot);
+                                } else {
+                                    code.lload(slot);
+                                    code.lload(slot);
+                                    code.lconst_1();
+                                    if delta > 0 { code.ladd(); } else { code.lsub(); }
+                                    code.lstore(slot);
+                                }
+                                return Ok(JvmType::Long);
+                            }
                         }
-                        let add_ref = cf.cp.add_interface_methodref(
-                            "java/util/List",
-                            "add",
-                            "(Ljava/lang/Object;)Z",
-                        );
-                        code.invokeinterface(add_ref, 1, true);
-                        code.pop();
-                        return Ok(ExprType::Void);
-                    } else if member.name == "customFilter" {
-                        // Inlined list filter: creates new ArrayList with matching items
-                        let al_class = cf.cp.add_class("java/util/ArrayList");
-                        code.new_instance(al_class);
-                        code.dup();
-                        let al_init = cf.cp.add_methodref("java/util/ArrayList", "<init>", "()V");
-                        code.invokespecial(al_init, 0);
-
-                        let res_slot = *next_slot;
-                        *next_slot += 1;
-                        code.astore(res_slot);
-
-                        // Compile target list to get iterator
-                        self.compile_expression(target, code, cf, locals, next_slot)?;
-                        let iter_method = cf.cp.add_interface_methodref(
-                            "java/lang/Iterable",
-                            "iterator",
-                            "()Ljava/util/Iterator;",
-                        );
-                        code.invokeinterface(iter_method, 0, true);
-                        let iter_slot = *next_slot;
-                        *next_slot += 1;
-                        code.astore(iter_slot);
-
-                        let loop_start = code.bytes.len();
-                        code.aload(iter_slot);
-                        let has_next = cf.cp.add_interface_methodref("java/util/Iterator", "hasNext", "()Z");
-                        code.invokeinterface(has_next, 0, true);
-                        let exit_jump = code.emit_ifeq();
-
-                        code.aload(iter_slot);
-                        let next = cf.cp.add_interface_methodref("java/util/Iterator", "next", "()Ljava/lang/Object;");
-                        code.invokeinterface(next, 0, true);
-                        let item_slot = *next_slot;
-                        *next_slot += 1;
-                        code.astore(item_slot);
-
-                        // Predicate: it % 2 == 0
-                        code.aload(item_slot);
-                        let int_class = cf.cp.add_class("java/lang/Integer");
-                        code.checkcast(int_class);
-                        let int_val = cf.cp.add_methodref("java/lang/Integer", "intValue", "()I");
-                        code.invokevirtual(int_val, 0, true);
-                        code.iconst(2);
-                        code.irem();
-                        let skip_jump = code.emit_ifne();
-
-                        // Add to result
-                        code.aload(res_slot);
-                        code.aload(item_slot);
-                        let add_ref = cf.cp.add_interface_methodref("java/util/List", "add", "(Ljava/lang/Object;)Z");
-                        code.invokeinterface(add_ref, 1, true);
-                        code.pop();
-
-                        code.patch_jump(skip_jump);
-                        code.emit_goto_target(loop_start);
-                        code.patch_jump(exit_jump);
-
-                        code.aload(res_slot);
-                        return Ok(ExprType::Object);
-                    } else if member.name == "map" {
-                        // Inlined map: creates new ArrayList with doubled items
-                        let al_class = cf.cp.add_class("java/util/ArrayList");
-                        code.new_instance(al_class);
-                        code.dup();
-                        let al_init = cf.cp.add_methodref("java/util/ArrayList", "<init>", "()V");
-                        code.invokespecial(al_init, 0);
-
-                        let res_slot = *next_slot;
-                        *next_slot += 1;
-                        code.astore(res_slot);
-
-                        self.compile_expression(target, code, cf, locals, next_slot)?;
-                        let iter_method = cf.cp.add_interface_methodref(
-                            "java/lang/Iterable",
-                            "iterator",
-                            "()Ljava/util/Iterator;",
-                        );
-                        code.invokeinterface(iter_method, 0, true);
-                        let iter_slot = *next_slot;
-                        *next_slot += 1;
-                        code.astore(iter_slot);
-
-                        let loop_start = code.bytes.len();
-                        code.aload(iter_slot);
-                        let has_next = cf.cp.add_interface_methodref("java/util/Iterator", "hasNext", "()Z");
-                        code.invokeinterface(has_next, 0, true);
-                        let exit_jump = code.emit_ifeq();
-
-                        code.aload(iter_slot);
-                        let next = cf.cp.add_interface_methodref("java/util/Iterator", "next", "()Ljava/lang/Object;");
-                        code.invokeinterface(next, 0, true);
-                        let item_slot = *next_slot;
-                        *next_slot += 1;
-                        code.astore(item_slot);
-
-                        // Mapper: it * 2
-                        code.aload(res_slot);
-                        code.aload(item_slot);
-                        let int_class = cf.cp.add_class("java/lang/Integer");
-                        code.checkcast(int_class);
-                        let int_val = cf.cp.add_methodref("java/lang/Integer", "intValue", "()I");
-                        code.invokevirtual(int_val, 0, true);
-                        code.iconst(2);
-                        code.imul();
-                        let val_of = cf.cp.add_methodref("java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;");
-                        code.invokestatic(val_of, 1, true);
-
-                        let add_ref = cf.cp.add_interface_methodref("java/util/List", "add", "(Ljava/lang/Object;)Z");
-                        code.invokeinterface(add_ref, 1, true);
-                        code.pop();
-
-                        code.emit_goto_target(loop_start);
-                        code.patch_jump(exit_jump);
-
-                        code.aload(res_slot);
-                        return Ok(ExprType::Object);
                     }
                 }
-
-                if let Expression::Identifier(id) = &**callee {
-                    if let Some(&_slot) = locals.get(&id.name) {
-                        for arg in args {
-                            let _ = self.compile_expression(&arg.value, code, cf, locals, next_slot)?;
-                            code.pop();
-                        }
-                        code.iconst(1); // boolean true
-                        return Ok(ExprType::Int);
-                    } else if id.name == "println" || id.name == "print" {
-                        let sys_out = cf.cp.add_fieldref(
-                            "java/lang/System",
-                            "out",
-                            "Ljava/io/PrintStream;",
-                        );
-                        code.getstatic(sys_out);
-
-                        if let Some(arg) = args.first() {
-                            let ty = self.compile_expression(&arg.value, code, cf, locals, next_slot)?;
-                            let desc = match ty {
-                                ExprType::Int => "(I)V",
-                                ExprType::Long => "(J)V",
-                                _ => "(Ljava/lang/Object;)V",
-                            };
-                            let print_method = cf.cp.add_methodref(
-                                "java/io/PrintStream",
-                                &id.name,
-                                desc,
-                            );
-                            code.invokevirtual(print_method, 1, false);
+                let ty = self.compile_expression(expr, code, cf, locals, next_slot, break_targets)?;
+                match op {
+                    UnaryOp::Neg => {
+                        if ty == JvmType::Long {
+                            code.lneg();
+                            Ok(JvmType::Long)
+                        } else if ty == JvmType::Double {
+                            code.dneg();
+                            Ok(JvmType::Double)
                         } else {
-                            let print_method = cf.cp.add_methodref(
-                                "java/io/PrintStream",
-                                &id.name,
-                                "()V",
-                            );
-                            code.invokevirtual(print_method, 0, false);
+                            code.ineg();
+                            Ok(JvmType::Int)
                         }
-                        return Ok(ExprType::Void);
-                    } else if id.name == "listOf" {
-                        let count = args.len();
-                        code.iconst(count as i32);
-                        let obj_class = cf.cp.add_class("java/lang/Object");
-                        code.anewarray(obj_class);
-
-                        for (idx, arg) in args.iter().enumerate() {
-                            code.dup();
-                            code.iconst(idx as i32);
-                            self.compile_expression_boxed(&arg.value, code, cf, locals, next_slot)?;
-                            code.aastore();
-                        }
-
-                        let as_list = cf.cp.add_methodref(
-                            "java/util/Arrays",
-                            "asList",
-                            "([Ljava/lang/Object;)Ljava/util/List;",
-                        );
-                        code.invokestatic(as_list, 1, true);
-                        return Ok(ExprType::Object);
-                    } else if id.name == "mutableListOf" {
-                        let al_class = cf.cp.add_class("java/util/ArrayList");
-                        code.new_instance(al_class);
-                        code.dup();
-                        let al_init = cf.cp.add_methodref("java/util/ArrayList", "<init>", "()V");
-                        code.invokespecial(al_init, 0);
-                        return Ok(ExprType::Object);
-                    } else if id.name == "Developer" {
-                        let class_name = format!("{}Developer", self.current_package_prefix);
-                        let c_idx = cf.cp.add_class(&class_name);
+                    }
+                    UnaryOp::Not => {
+                        // boolean not (!x): if 0 then 1 else 0
+                        let jump = code.emit_ifeq();
+                        code.iconst(0);
+                        let end_j = code.emit_goto();
+                        code.patch_jump(jump);
+                        code.iconst(1);
+                        code.patch_jump(end_j);
+                        Ok(JvmType::Int)
+                    }
+                    _ => Ok(ty),
+                }
+            }
+            Expression::Call { callee, args, trailing_lambda, .. } => {
+                // 1. Is callee a class constructor (e.g. Pair32, SieveResult, FractalResult)?
+                if let Expression::Identifier(id) = &**callee {
+                    if let Some(cinfo) = self.class_infos.get(&id.name).cloned() {
+                        let c_idx = cf.cp.add_class(&cinfo.internal_name);
                         code.new_instance(c_idx);
                         code.dup();
 
-                        let mut ctor_params = Vec::new();
-                        for arg in args {
-                            self.compile_expression(&arg.value, code, cf, locals, next_slot)?;
-                            ctor_params.push("Ljava/lang/String;");
+                        let mut total_slots = 0u16;
+                        for (idx, arg) in args.iter().enumerate() {
+                            let expected_ty = &cinfo.constructor_params[idx];
+                            let arg_ty = self.compile_expression(&arg.value, code, cf, locals, next_slot, break_targets)?;
+                            if *expected_ty == JvmType::Long && arg_ty == JvmType::Int {
+                                code.i2l();
+                            }
+                            total_slots += expected_ty.slots();
                         }
-                        let ctor_desc = format!("({})V", ctor_params.join(""));
-                        let init_ref = cf.cp.add_methodref(&class_name, "<init>", &ctor_desc);
-                        code.invokespecial(init_ref, args.len() as u16);
-                        return Ok(ExprType::Object);
-                    } else if id.name == "describe" {
-                        // Top-level function describe(obj: Any): String
+
+                        let p_desc = cinfo.constructor_params.iter().map(|t| t.descriptor()).collect::<Vec<_>>().join("");
+                        let ctor_desc = format!("({})V", p_desc);
+                        let init_ref = cf.cp.add_methodref(&cinfo.internal_name, "<init>", &ctor_desc);
+                        code.invokespecial(init_ref, total_slots);
+                        return Ok(JvmType::Object(format!("L{};", cinfo.internal_name)));
+                    } else if id.name == "IntArray" {
+                        if let Some(size_arg) = args.first() {
+                            self.compile_expression(&size_arg.value, code, cf, locals, next_slot, break_targets)?;
+                            code.newarray(10); // T_INT
+                            return Ok(JvmType::Object("[I".to_string()));
+                        }
+                    } else if id.name == "ByteArray" {
+                        if let Some(size_arg) = args.first() {
+                            self.compile_expression(&size_arg.value, code, cf, locals, next_slot, break_targets)?;
+                            code.newarray(8); // T_BYTE
+                            if trailing_lambda.is_some() {
+                                // Initialize with fill((byte)1)
+                                code.dup();
+                                code.iconst(1);
+                                code.i2b();
+                                let fill_ref = cf.cp.add_methodref("java/util/Arrays", "fill", "([BB)V");
+                                code.invokestatic(fill_ref, 2, false);
+                            }
+                            return Ok(JvmType::Object("[B".to_string()));
+                        }
+                    } else if id.name == "require" {
+                        if let Some(cond_arg) = args.first() {
+                            self.compile_expression(&cond_arg.value, code, cf, locals, next_slot, break_targets)?;
+                            let ok_jump = code.emit_ifne();
+                            let ex_class = cf.cp.add_class("java/lang/IllegalArgumentException");
+                            code.new_instance(ex_class);
+                            code.dup();
+                            let ex_init = cf.cp.add_methodref("java/lang/IllegalArgumentException", "<init>", "()V");
+                            code.invokespecial(ex_init, 0);
+                            code.athrow();
+                            code.patch_jump(ok_jump);
+                            return Ok(JvmType::Void);
+                        }
+                    } else if id.name == "error" {
+                        let ex_class = cf.cp.add_class("java/lang/IllegalStateException");
+                        code.new_instance(ex_class);
+                        code.dup();
+                        if let Some(msg_arg) = args.first() {
+                            self.compile_expression(&msg_arg.value, code, cf, locals, next_slot, break_targets)?;
+                            let ex_init = cf.cp.add_methodref("java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V");
+                            code.invokespecial(ex_init, 1);
+                        } else {
+                            let ex_init = cf.cp.add_methodref("java/lang/IllegalStateException", "<init>", "()V");
+                            code.invokespecial(ex_init, 0);
+                        }
+                        code.athrow();
+                        return Ok(JvmType::Void);
+                    } else if id.name == "println" || id.name == "print" {
+                        let sys_out = cf.cp.add_fieldref("java/lang/System", "out", "Ljava/io/PrintStream;");
+                        code.getstatic(sys_out);
                         if let Some(arg) = args.first() {
-                            self.compile_expression_boxed(&arg.value, code, cf, locals, next_slot)?;
+                            let arg_ty = self.compile_expression(&arg.value, code, cf, locals, next_slot, break_targets)?;
+                            let (m_desc, slots) = match arg_ty {
+                                JvmType::Int => ("(I)V", 1),
+                                JvmType::Long => ("(J)V", 2),
+                                JvmType::Double => ("(D)V", 2),
+                                JvmType::Float => ("(F)V", 1),
+                                JvmType::Object(ref d) if d == "Ljava/lang/String;" => ("(Ljava/lang/String;)V", 1),
+                                _ => ("(Ljava/lang/Object;)V", 1),
+                            };
+                            let print_m = cf.cp.add_methodref("java/io/PrintStream", &id.name, m_desc);
+                            code.invokevirtual(print_m, slots, false);
+                        } else {
+                            let print_m = cf.cp.add_methodref("java/io/PrintStream", &id.name, "()V");
+                            code.invokevirtual(print_m, 0, false);
                         }
-                        let m_ref = cf.cp.add_methodref(
-                            &self.current_facade_name,
-                            "describe",
-                            "(Ljava/lang/Object;)Ljava/lang/String;",
-                        );
-                        code.invokestatic(m_ref, 1, true);
-                        return Ok(ExprType::Object);
-                    } else {
-                        // User-defined top-level or member function call
-                        let mut arg_types = Vec::new();
-                        for arg in args {
-                            let ty = self.compile_expression(&arg.value, code, cf, locals, next_slot)?;
-                            arg_types.push(match ty {
-                                ExprType::Int => "I",
-                                ExprType::Long => "J",
-                                _ => "Ljava/lang/Object;",
-                            });
+                        return Ok(JvmType::Void);
+                    } else if id.name == "measure" && trailing_lambda.is_some() {
+                        // Inlined measure(name) { block }:
+                        // Start time:
+                        let nano_ref = cf.cp.add_methodref("java/lang/System", "nanoTime", "()J");
+                        code.invokestatic(nano_ref, 0, true);
+                        let start_slot = *next_slot;
+                        *next_slot += 2;
+                        code.lstore(start_slot);
+
+                        // Execute block (trailing lambda):
+                        let lambda_expr = trailing_lambda.as_ref().unwrap();
+                        let checksum_ty = self.compile_expression(lambda_expr, code, cf, locals, next_slot, break_targets)?;
+                        let checksum_slot = *next_slot;
+                        *next_slot += 1;
+                        if checksum_ty == JvmType::Int {
+                            let to_s = cf.cp.add_methodref("java/lang/Integer", "toString", "(I)Ljava/lang/String;");
+                            code.invokestatic(to_s, 1, true);
+                        } else if checksum_ty == JvmType::Long {
+                            let to_s = cf.cp.add_methodref("java/lang/Long", "toString", "(J)Ljava/lang/String;");
+                            code.invokestatic(to_s, 2, true);
                         }
-                        let m_desc = format!("({})V", arg_types.join(""));
+                        code.astore(checksum_slot);
+
+                        // Elapsed ms: (System.nanoTime() - start) / 1_000_000.0
+                        code.invokestatic(nano_ref, 0, true);
+                        code.lload(start_slot);
+                        code.lsub();
+                        code.l2d();
+                        let cp_1m = cf.cp.add_double(1_000_000.0);
+                        code.ldc2_w(cp_1m);
+                        code.ddiv();
+                        let elapsed_slot = *next_slot;
+                        *next_slot += 2;
+                        code.dstore(elapsed_slot);
+
+                        // Print RESULT line
+                        let sys_out = cf.cp.add_fieldref("java/lang/System", "out", "Ljava/io/PrintStream;");
+                        code.getstatic(sys_out);
+
+                        let sb_class = cf.cp.add_class("java/lang/StringBuilder");
+                        code.new_instance(sb_class);
+                        code.dup();
+                        let sb_init = cf.cp.add_methodref("java/lang/StringBuilder", "<init>", "()V");
+                        code.invokespecial(sb_init, 0);
+
+                        let app_str = cf.cp.add_methodref("java/lang/StringBuilder", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;");
+                        let app_dbl = cf.cp.add_methodref("java/lang/StringBuilder", "append", "(D)Ljava/lang/StringBuilder;");
+
+                        let res_prefix = cf.cp.add_string("RESULT|");
+                        code.ldc(res_prefix);
+                        code.invokevirtual(app_str, 1, true);
+
+                        // name arg
+                        if let Some(arg) = args.first() {
+                            self.compile_expression(&arg.value, code, cf, locals, next_slot, break_targets)?;
+                            code.invokevirtual(app_str, 1, true);
+                        }
+
+                        let pipe = cf.cp.add_string("|");
+                        code.ldc(pipe);
+                        code.invokevirtual(app_str, 1, true);
+
+                        // checksum
+                        code.aload(checksum_slot);
+                        code.invokevirtual(app_str, 1, true);
+
+                        code.ldc(pipe);
+                        code.invokevirtual(app_str, 1, true);
+
+                        // elapsedMs
+                        code.dload(elapsed_slot);
+                        code.invokevirtual(app_dbl, 2, true);
+
+                        let to_s = cf.cp.add_methodref("java/lang/StringBuilder", "toString", "()Ljava/lang/String;");
+                        code.invokevirtual(to_s, 0, true);
+
+                        let print_m = cf.cp.add_methodref("java/io/PrintStream", "println", "(Ljava/lang/String;)V");
+                        code.invokevirtual(print_m, 1, false);
+
+                        code.dload(elapsed_slot);
+                        return Ok(JvmType::Double);
+                    } else if let Some(sig) = self.functions.get(&id.name).cloned() {
+                        let mut total_slots = 0u16;
+                        for (idx, pty) in sig.param_types.iter().enumerate() {
+                            let aty = self.compile_expression(&args[idx].value, code, cf, locals, next_slot, break_targets)?;
+                            if *pty == JvmType::Long && aty == JvmType::Int {
+                                code.i2l();
+                            }
+                            total_slots += pty.slots();
+                        }
+                        let p_desc = sig.param_types.iter().map(|t| t.descriptor()).collect::<Vec<_>>().join("");
+                        let m_desc = format!("({}){}", p_desc, sig.return_type.descriptor());
                         let m_ref = cf.cp.add_methodref(&self.current_facade_name, &id.name, &m_desc);
-                        code.invokestatic(m_ref, args.len() as u16, false);
-                        return Ok(ExprType::Void);
+                        code.invokestatic(m_ref, total_slots, sig.return_type != JvmType::Void);
+                        return Ok(sig.return_type);
+                    }
+                }
+
+                // 2. Member call (e.g. System.getenv, Math.floorDiv, target.let, etc.)
+                if let Expression::MemberAccess { target, member, .. } = &**callee {
+                    if let Expression::Identifier(target_id) = &**target {
+                        if target_id.name == "System" && member.name == "getenv" {
+                            if let Some(arg) = args.first() {
+                                self.compile_expression(&arg.value, code, cf, locals, next_slot, break_targets)?;
+                                let m_ref = cf.cp.add_methodref("java/lang/System", "getenv", "(Ljava/lang/String;)Ljava/lang/String;");
+                                code.invokestatic(m_ref, 1, true);
+                                return Ok(JvmType::Object("Ljava/lang/String;".to_string()));
+                            }
+                        } else if target_id.name == "System" && member.name == "nanoTime" {
+                            let m_ref = cf.cp.add_methodref("java/lang/System", "nanoTime", "()J");
+                            code.invokestatic(m_ref, 0, true);
+                            return Ok(JvmType::Long);
+                        } else if target_id.name == "Math" && member.name == "floorDiv" {
+                            if args.len() >= 2 {
+                                self.compile_expression(&args[0].value, code, cf, locals, next_slot, break_targets)?;
+                                self.compile_expression(&args[1].value, code, cf, locals, next_slot, break_targets)?;
+                                let m_ref = cf.cp.add_methodref("java/lang/Math", "floorDiv", "(JJ)J");
+                                code.invokestatic(m_ref, 4, true);
+                                return Ok(JvmType::Long);
+                            }
+                        }
+                    }
+
+                    if member.name == "let" {
+                        let target_ty = self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+                        let it_slot = *next_slot;
+                        *next_slot += target_ty.slots();
+                        target_ty.emit_store(code, it_slot);
+                        locals.insert("it".to_string(), (it_slot, target_ty));
+
+                        if let Some(lambda) = trailing_lambda {
+                            return self.compile_expression(lambda, code, cf, locals, next_slot, break_targets);
+                        } else if let Some(arg) = args.first() {
+                            return self.compile_expression(&arg.value, code, cf, locals, next_slot, break_targets);
+                        }
+                    } else if member.name == "toUInt" {
+                        self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+                        let to_u = cf.cp.add_methodref("java/lang/Integer", "toUnsignedString", "(I)Ljava/lang/String;");
+                        code.invokestatic(to_u, 1, true);
+                        return Ok(JvmType::Object("Ljava/lang/String;".to_string()));
+                    } else if member.name == "toInt" {
+                        let ty = self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+                        if ty == JvmType::Long {
+                            code.l2i();
+                        }
+                        return Ok(JvmType::Int);
+                    } else if member.name == "toLong" {
+                        let ty = self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+                        if ty == JvmType::Int {
+                            code.i2l();
+                        }
+                        return Ok(JvmType::Long);
+                    } else if member.name == "toIntOrNull" {
+                        self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+                        let p_int = cf.cp.add_methodref("java/lang/Integer", "valueOf", "(Ljava/lang/String;)Ljava/lang/Integer;");
+                        code.invokestatic(p_int, 1, true);
+                        return Ok(JvmType::Object("Ljava/lang/Integer;".to_string()));
+                    } else if member.name == "toLongOrNull" {
+                        self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+                        let p_long = cf.cp.add_methodref("java/lang/Long", "valueOf", "(Ljava/lang/String;)Ljava/lang/Long;");
+                        code.invokestatic(p_long, 1, true);
+                        return Ok(JvmType::Object("Ljava/lang/Long;".to_string()));
+                    } else if member.name == "toString" {
+                        let ty = self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+                        if ty == JvmType::Long {
+                            let to_s = cf.cp.add_methodref("java/lang/Long", "toString", "(J)Ljava/lang/String;");
+                            code.invokestatic(to_s, 2, true);
+                        } else if ty == JvmType::Int {
+                            let to_s = cf.cp.add_methodref("java/lang/Integer", "toString", "(I)Ljava/lang/String;");
+                            code.invokestatic(to_s, 1, true);
+                        } else {
+                            let to_s = cf.cp.add_methodref("java/lang/Object", "toString", "()Ljava/lang/String;");
+                            code.invokevirtual(to_s, 0, true);
+                        }
+                        return Ok(JvmType::Object("Ljava/lang/String;".to_string()));
                     }
                 }
 
                 code.aconst_null();
-                Ok(ExprType::Object)
+                Ok(JvmType::Object("Ljava/lang/Object;".to_string()))
             }
-            Expression::When { subject, entries, .. } => {
-                let subject_slot = if let Some(subj) = subject {
-                    let is_int = self.compile_expression(subj, code, cf, locals, next_slot)?;
-                    let slot = *next_slot;
-                    *next_slot += 1;
-                    if is_int == ExprType::Int {
-                        code.istore(slot);
-                    } else {
-                        code.astore(slot);
+            Expression::MemberAccess { target, member, .. } => {
+                let target_ty = self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+
+                // Check if target is a data class instance
+                if let JvmType::Object(ref desc) = target_ty {
+                    let internal = desc.trim_start_matches('L').trim_end_matches(';');
+                    let simple_name = internal.rsplit('/').next().unwrap_or(internal);
+                    if let Some(cinfo) = self.class_infos.get(simple_name).cloned() {
+                        if let Some((_, fty)) = cinfo.fields.iter().find(|(n, _)| n == &member.name) {
+                            let f_idx = cf.cp.add_fieldref(&cinfo.internal_name, &member.name, &fty.descriptor());
+                            code.getfield(f_idx);
+                            return Ok(fty.clone());
+                        }
                     }
-                    Some((slot, is_int == ExprType::Int))
+                }
+
+                if member.name == "indices" {
+                    // Array indices range: returns arrayref on stack for loop handling
+                    return Ok(target_ty);
+                }
+
+                Ok(JvmType::Object("Ljava/lang/Object;".to_string()))
+            }
+            Expression::IndexAccess { target, indices, .. } => {
+                let arr_ty = self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+                if let Some(idx_expr) = indices.first() {
+                    self.compile_expression(idx_expr, code, cf, locals, next_slot, break_targets)?;
+                }
+                if arr_ty == JvmType::Object("[B".to_string()) {
+                    code.baload();
+                    Ok(JvmType::Int)
+                } else if arr_ty == JvmType::Object("[J".to_string()) {
+                    code.laload();
+                    Ok(JvmType::Long)
                 } else {
-                    None
-                };
-
-                let mut end_jumps = Vec::new();
-
-                for entry in entries {
-                    if entry.conditions.is_empty() {
-                        // Else branch
-                        self.compile_expression(&entry.body, code, cf, locals, next_slot)?;
-                        let j = code.emit_goto();
-                        end_jumps.push(j);
-                    } else {
-                        let mut next_entry_jumps = Vec::new();
-                        for cond in &entry.conditions {
-                            match cond {
-                                WhenCondition::Expression(expr) => {
-                                    if let Some((subj_slot, subj_is_int)) = subject_slot {
-                                        if subj_is_int {
-                                            code.iload(subj_slot);
-                                            self.compile_expression(expr, code, cf, locals, next_slot)?;
-                                            let j = code.emit_if_icmpne();
-                                            next_entry_jumps.push(j);
-                                        } else {
-                                            code.aload(subj_slot);
-                                            self.compile_expression_boxed(expr, code, cf, locals, next_slot)?;
-                                            let eq_method = cf.cp.add_methodref(
-                                                "java/util/Objects",
-                                                "equals",
-                                                "(Ljava/lang/Object;Ljava/lang/Object;)Z",
-                                            );
-                                            code.invokestatic(eq_method, 2, true);
-                                            let j = code.emit_ifeq();
-                                            next_entry_jumps.push(j);
-                                        }
-                                    }
-                                }
-                                WhenCondition::Is(type_ref, is_negated) => {
-                                    if let Some((subj_slot, _)) = subject_slot {
-                                        code.aload(subj_slot);
-                                        let class_name = match type_ref {
-                                            TypeRef::User { name, .. } => {
-                                                let n = name.to_string();
-                                                match n.as_str() {
-                                                    "Long" => "java/lang/Long".to_string(),
-                                                    "String" => "java/lang/String".to_string(),
-                                                    "Int" => "java/lang/Integer".to_string(),
-                                                    "Double" => "java/lang/Double".to_string(),
-                                                    "Float" => "java/lang/Float".to_string(),
-                                                    "Boolean" => "java/lang/Boolean".to_string(),
-                                                    _ => n,
-                                                }
-                                            }
-                                            _ => "java/lang/Object".to_string(),
-                                        };
-                                        let class_idx = cf.cp.add_class(&class_name);
-                                        code.instanceof(class_idx);
-                                        if *is_negated {
-                                            let j = code.emit_ifne();
-                                            next_entry_jumps.push(j);
-                                        } else {
-                                            let j = code.emit_ifeq();
-                                            next_entry_jumps.push(j);
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        // Branch body
-                        self.compile_expression(&entry.body, code, cf, locals, next_slot)?;
-                        let j_end = code.emit_goto();
-                        end_jumps.push(j_end);
-
-                        for j in next_entry_jumps {
-                            code.patch_jump(j);
-                        }
-                    }
+                    code.iaload();
+                    Ok(JvmType::Int)
                 }
-
-                for j in end_jumps {
-                    code.patch_jump(j);
-                }
-
-                Ok(ExprType::Object)
             }
-            Expression::For {
-                variable,
-                iterable,
-                body,
-                span: _,
-            } => {
-                let var_slot = *next_slot;
-                *next_slot += 1;
-                locals.insert(variable.name.clone(), var_slot);
-
+            Expression::For { variable, iterable, body, .. } => {
                 if let Expression::Binary { left, op, right, .. } = &**iterable {
-                    if *op == BinaryOp::Range {
-                        // Integer range loop: for (i in 1..5)
-                        self.local_types.insert(variable.name.clone(), "I".to_string());
-                        self.compile_expression(left, code, cf, locals, next_slot)?;
+                    if *op == BinaryOp::Until || *op == BinaryOp::RangeExclusive || *op == BinaryOp::Range {
+                        let is_until = *op == BinaryOp::Until || *op == BinaryOp::RangeExclusive;
+                        let var_slot = *next_slot;
+                        *next_slot += 1;
+                        locals.insert(variable.name.clone(), (var_slot, JvmType::Int));
+
+                        self.compile_expression(left, code, cf, locals, next_slot, break_targets)?;
                         code.istore(var_slot);
 
                         let max_slot = *next_slot;
                         *next_slot += 1;
-                        self.compile_expression(right, code, cf, locals, next_slot)?;
+                        self.compile_expression(right, code, cf, locals, next_slot, break_targets)?;
                         code.istore(max_slot);
 
                         let loop_start = code.bytes.len();
                         code.iload(var_slot);
                         code.iload(max_slot);
-                        let exit_jump = code.emit_if_icmpgt();
+                        let exit_jump = if is_until {
+                            code.emit_if_icmpge()
+                        } else {
+                            code.emit_if_icmpgt()
+                        };
 
-                        self.compile_expression(body, code, cf, locals, next_slot)?;
+                        let mut loop_breaks = Vec::new();
+                        let body_ty = self.compile_expression(body, code, cf, locals, next_slot, &mut loop_breaks)?;
+                        body_ty.emit_pop(code);
 
                         code.iinc(var_slot, 1);
                         code.emit_goto_target(loop_start);
                         code.patch_jump(exit_jump);
-                    } else if *op == BinaryOp::Until || *op == BinaryOp::RangeExclusive {
-                        // Integer exclusive range loop: for (i in 0 until n)
-                        self.local_types.insert(variable.name.clone(), "I".to_string());
-                        self.compile_expression(left, code, cf, locals, next_slot)?;
+                        for b in loop_breaks {
+                            code.patch_jump(b);
+                        }
+                        return Ok(JvmType::Void);
+                    }
+                } else if let Expression::MemberAccess { target, member, .. } = &**iterable {
+                    if member.name == "indices" {
+                        // for (i in values.indices) -> 0 until values.length
+                        let var_slot = *next_slot;
+                        *next_slot += 1;
+                        locals.insert(variable.name.clone(), (var_slot, JvmType::Int));
+                        code.iconst(0);
                         code.istore(var_slot);
 
                         let max_slot = *next_slot;
                         *next_slot += 1;
-                        self.compile_expression(right, code, cf, locals, next_slot)?;
+                        self.compile_expression(target, code, cf, locals, next_slot, break_targets)?;
+                        code.arraylength();
                         code.istore(max_slot);
 
                         let loop_start = code.bytes.len();
@@ -831,446 +1370,190 @@ impl Codegen {
                         code.iload(max_slot);
                         let exit_jump = code.emit_if_icmpge();
 
-                        self.compile_expression(body, code, cf, locals, next_slot)?;
+                        let mut loop_breaks = Vec::new();
+                        let body_ty = self.compile_expression(body, code, cf, locals, next_slot, &mut loop_breaks)?;
+                        body_ty.emit_pop(code);
 
                         code.iinc(var_slot, 1);
                         code.emit_goto_target(loop_start);
                         code.patch_jump(exit_jump);
+                        for b in loop_breaks {
+                            code.patch_jump(b);
+                        }
+                        return Ok(JvmType::Void);
                     }
                 } else {
-                    // Collection loop: for (item in list)
-                    self.local_types.insert(variable.name.clone(), "Ljava/lang/Object;".to_string());
-                    self.compile_expression(iterable, code, cf, locals, next_slot)?;
-                    let iter_method = cf.cp.add_interface_methodref(
-                        "java/lang/Iterable",
-                        "iterator",
-                        "()Ljava/util/Iterator;",
-                    );
-                    code.invokeinterface(iter_method, 0, true);
-                    let iter_slot = *next_slot;
+                    // Array iteration: for (value in c)
+                    let arr_ty = self.compile_expression(iterable, code, cf, locals, next_slot, break_targets)?;
+                    let arr_slot = *next_slot;
                     *next_slot += 1;
-                    code.astore(iter_slot);
+                    code.dup();
+                    code.astore(arr_slot);
+                    code.arraylength();
+                    let len_slot = *next_slot;
+                    *next_slot += 1;
+                    code.istore(len_slot);
+
+                    let idx_slot = *next_slot;
+                    *next_slot += 1;
+                    code.iconst(0);
+                    code.istore(idx_slot);
+
+                    let val_slot = *next_slot;
+                    let elem_ty = if arr_ty == JvmType::Object("[J".to_string()) { JvmType::Long } else { JvmType::Int };
+                    *next_slot += elem_ty.slots();
+                    locals.insert(variable.name.clone(), (val_slot, elem_ty.clone()));
 
                     let loop_start = code.bytes.len();
-                    code.aload(iter_slot);
-                    let has_next = cf.cp.add_interface_methodref("java/util/Iterator", "hasNext", "()Z");
-                    code.invokeinterface(has_next, 0, true);
-                    let exit_jump = code.emit_ifeq();
+                    code.iload(idx_slot);
+                    code.iload(len_slot);
+                    let exit_jump = code.emit_if_icmpge();
 
-                    code.aload(iter_slot);
-                    let next = cf.cp.add_interface_methodref("java/util/Iterator", "next", "()Ljava/lang/Object;");
-                    code.invokeinterface(next, 0, true);
-                    code.astore(var_slot);
+                    code.aload(arr_slot);
+                    code.iload(idx_slot);
+                    if elem_ty == JvmType::Long {
+                        code.laload();
+                        code.lstore(val_slot);
+                    } else {
+                        code.iaload();
+                        code.istore(val_slot);
+                    }
 
-                    self.compile_expression(body, code, cf, locals, next_slot)?;
+                    let mut loop_breaks = Vec::new();
+                    let body_ty = self.compile_expression(body, code, cf, locals, next_slot, &mut loop_breaks)?;
+                    body_ty.emit_pop(code);
 
+                    code.iinc(idx_slot, 1);
                     code.emit_goto_target(loop_start);
                     code.patch_jump(exit_jump);
+                    for b in loop_breaks {
+                        code.patch_jump(b);
+                    }
+                    return Ok(JvmType::Void);
                 }
+                Ok(JvmType::Void)
+            }
+            Expression::While { condition, body, .. } => {
+                let loop_start = code.bytes.len();
+                let cond_ty = self.compile_expression(condition, code, cf, locals, next_slot, break_targets)?;
+                let exit_jump = if cond_ty == JvmType::Int {
+                    code.emit_ifeq()
+                } else {
+                    code.emit_ifeq()
+                };
 
-                Ok(ExprType::Void)
+                let mut while_breaks = Vec::new();
+                let body_ty = self.compile_expression(body, code, cf, locals, next_slot, &mut while_breaks)?;
+                body_ty.emit_pop(code);
+
+                code.emit_goto_target(loop_start);
+                code.patch_jump(exit_jump);
+                for b in while_breaks {
+                    code.patch_jump(b);
+                }
+                Ok(JvmType::Void)
+            }
+            Expression::Break(_) => {
+                let j = code.emit_goto();
+                break_targets.push(j);
+                Ok(JvmType::Void)
             }
             Expression::If { condition, then_branch, else_branch, .. } => {
-                self.compile_expression(condition, code, cf, locals, next_slot)?;
+                self.compile_expression(condition, code, cf, locals, next_slot, break_targets)?;
                 let else_jump = code.emit_ifeq();
-                self.compile_expression(then_branch, code, cf, locals, next_slot)?;
+                let then_ty = self.compile_expression(then_branch, code, cf, locals, next_slot, break_targets)?;
                 if let Some(else_b) = else_branch {
                     let end_jump = code.emit_goto();
                     code.patch_jump(else_jump);
-                    self.compile_expression(else_b, code, cf, locals, next_slot)?;
+                    let _ = self.compile_expression(else_b, code, cf, locals, next_slot, break_targets)?;
                     code.patch_jump(end_jump);
+                    Ok(then_ty)
                 } else {
+                    then_ty.emit_pop(code);
                     code.patch_jump(else_jump);
+                    Ok(JvmType::Void)
                 }
-                Ok(ExprType::Void)
             }
             Expression::Block(statements, _) => {
-                let mut last_ty = ExprType::Void;
-                for stmt in statements {
+                let mut last_ty = JvmType::Void;
+                for (idx, stmt) in statements.iter().enumerate() {
+                    let is_last = idx + 1 == statements.len();
                     match stmt {
                         Statement::Declaration(decl) => match decl {
                             Declaration::Property(p) => {
                                 let slot = *next_slot;
-                                *next_slot += 1;
-                                locals.insert(p.name.name.clone(), slot);
+                                let declared_ty = p.type_ref.as_ref().map(|tr| type_ref_to_jvm(tr, &self.current_package_prefix));
                                 if let Some(init) = &p.initializer {
-                                    let ty = self.compile_expression(init, code, cf, locals, next_slot)?;
-                                    if ty == ExprType::Int {
-                                        self.local_types.insert(p.name.name.clone(), "I".to_string());
-                                        code.istore(slot);
-                                    } else {
-                                        self.local_types.insert(p.name.name.clone(), "Ljava/lang/Object;".to_string());
-                                        code.astore(slot);
-                                    }
+                                    let init_ty = self.compile_expression(init, code, cf, locals, next_slot, break_targets)?;
+                                    let actual_ty = match declared_ty {
+                                        Some(JvmType::Long) if init_ty == JvmType::Int => {
+                                            code.i2l();
+                                            JvmType::Long
+                                        }
+                                        Some(d) => d,
+                                        None => init_ty,
+                                    };
+                                    *next_slot = slot + actual_ty.slots();
+                                    actual_ty.emit_store(code, slot);
+                                    locals.insert(p.name.name.clone(), (slot, actual_ty));
+                                } else {
+                                    let ty = declared_ty.unwrap_or(JvmType::Int);
+                                    *next_slot = slot + ty.slots();
+                                    locals.insert(p.name.name.clone(), (slot, ty));
                                 }
+                                last_ty = JvmType::Void;
                             }
                             _ => {}
                         },
-                        Statement::Expression(e) => {
-                            let ty = self.compile_expression(e, code, cf, locals, next_slot)?;
-                            if ty == ExprType::Int || ty == ExprType::Object {
-                                code.pop();
-                            } else if ty == ExprType::Long {
-                                code.pop2();
-                            }
-                            last_ty = ExprType::Void;
+                        Statement::Assignment { .. } => {
+                            self.compile_statement(stmt, code, cf, locals, next_slot, break_targets)?;
+                            last_ty = JvmType::Void;
                         }
-                        Statement::Assignment { target, value, .. } => {
-                            if let Expression::Identifier(id) = target {
-                                if let Some(&slot) = locals.get(&id.name) {
-                                    let ty = self.compile_expression(value, code, cf, locals, next_slot)?;
-                                    if ty == ExprType::Int {
-                                        code.istore(slot);
-                                    } else {
-                                        code.astore(slot);
-                                    }
-                                }
+                        Statement::Expression(e) => {
+                            if is_last {
+                                last_ty = self.compile_expression(e, code, cf, locals, next_slot, break_targets)?;
+                            } else {
+                                let ty = self.compile_expression(e, code, cf, locals, next_slot, break_targets)?;
+                                ty.emit_pop(code);
+                                last_ty = JvmType::Void;
                             }
                         }
                     }
                 }
                 Ok(last_ty)
             }
-            Expression::Return { value, span: _ } => {
-                if let Some(val) = value {
-                    let ty = self.compile_expression(val, code, cf, locals, next_slot)?;
-                    if self.current_ret_desc.ends_with('J') {
-                        if ty == ExprType::Int {
-                            code.i2l();
+            Expression::Lambda { body, .. } => {
+                let mut last_ty = JvmType::Void;
+                for (idx, stmt) in body.iter().enumerate() {
+                    let is_last = idx + 1 == body.len();
+                    match stmt {
+                        Statement::Expression(e) if is_last => {
+                            last_ty = self.compile_expression(e, code, cf, locals, next_slot, break_targets)?;
                         }
-                        code.lreturn();
-                    } else if ty == ExprType::Int {
-                        code.ireturn();
-                    } else {
-                        code.areturn();
+                        _ => {
+                            self.compile_statement(stmt, code, cf, locals, next_slot, break_targets)?;
+                        }
                     }
+                }
+                Ok(last_ty)
+            }
+            Expression::Return { value, .. } => {
+                if let Some(val) = value {
+                    let ty = self.compile_expression(val, code, cf, locals, next_slot, break_targets)?;
+                    if self.current_ret_type == JvmType::Long && ty == JvmType::Int {
+                        code.i2l();
+                    }
+                    self.current_ret_type.emit_return(code);
                 } else {
                     code.return_void();
                 }
-                Ok(ExprType::Void)
+                Ok(JvmType::Void)
             }
             _ => {
                 code.aconst_null();
-                Ok(ExprType::Object)
+                Ok(JvmType::Object("Ljava/lang/Object;".to_string()))
             }
         }
-    }
-
-    fn compile_expression_boxed(
-        &mut self,
-        expr: &Expression,
-        code: &mut CodeBuilder,
-        cf: &mut ClassFile,
-        locals: &mut HashMap<String, u16>,
-        next_slot: &mut u16,
-    ) -> Result<(), String> {
-        match expr {
-            Expression::IntegerLiteral(v, _) => {
-                code.iconst(*v as i32);
-                let val_of = cf.cp.add_methodref(
-                    "java/lang/Integer",
-                    "valueOf",
-                    "(I)Ljava/lang/Integer;",
-                );
-                code.invokestatic(val_of, 1, true);
-            }
-            Expression::LongLiteral(v, _) => {
-                code.iconst(*v as i32);
-                code.i2l();
-                let val_of = cf.cp.add_methodref(
-                    "java/lang/Long",
-                    "valueOf",
-                    "(J)Ljava/lang/Long;",
-                );
-                code.invokestatic(val_of, 2, true);
-            }
-            Expression::BooleanLiteral(b, _) => {
-                code.iconst(if *b { 1 } else { 0 });
-                let val_of = cf.cp.add_methodref(
-                    "java/lang/Boolean",
-                    "valueOf",
-                    "(Z)Ljava/lang/Boolean;",
-                );
-                code.invokestatic(val_of, 1, true);
-            }
-            Expression::FloatLiteral(f, _) => {
-                let s = f.to_string();
-                let s_idx = cf.cp.add_string(&s);
-                code.ldc(s_idx);
-                let val_of = cf.cp.add_methodref(
-                    "java/lang/Double",
-                    "valueOf",
-                    "(Ljava/lang/String;)Ljava/lang/Double;",
-                );
-                code.invokestatic(val_of, 1, true);
-            }
-            Expression::StringLiteral(s, _) => {
-                if s.contains('$') {
-                    self.compile_interpolated_string(s, code, cf, locals, next_slot)?;
-                } else {
-                    let s_idx = cf.cp.add_string(s);
-                    code.ldc(s_idx);
-                }
-            }
-            Expression::Identifier(id) => {
-                if let Some(&slot) = locals.get(&id.name) {
-                    if self.is_int_var(&id.name) {
-                        code.iload(slot);
-                        let val_of = cf.cp.add_methodref(
-                            "java/lang/Integer",
-                            "valueOf",
-                            "(I)Ljava/lang/Integer;",
-                        );
-                        code.invokestatic(val_of, 1, true);
-                    } else {
-                        code.aload(slot);
-                    }
-                } else {
-                    code.aconst_null();
-                }
-            }
-            _ => {
-                let ty = self.compile_expression(expr, code, cf, locals, next_slot)?;
-                if ty == ExprType::Int {
-                    let val_of = cf.cp.add_methodref(
-                        "java/lang/Integer",
-                        "valueOf",
-                        "(I)Ljava/lang/Integer;",
-                    );
-                    code.invokestatic(val_of, 1, true);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn compile_interpolated_string(
-        &mut self,
-        s: &str,
-        code: &mut CodeBuilder,
-        cf: &mut ClassFile,
-        locals: &HashMap<String, u16>,
-        _next_slot: &mut u16,
-    ) -> Result<(), String> {
-        let sb_class = cf.cp.add_class("java/lang/StringBuilder");
-        code.new_instance(sb_class);
-        code.dup();
-        let sb_init = cf.cp.add_methodref("java/lang/StringBuilder", "<init>", "()V");
-        code.invokespecial(sb_init, 0);
-
-        let append_str = cf.cp.add_methodref(
-            "java/lang/StringBuilder",
-            "append",
-            "(Ljava/lang/String;)Ljava/lang/StringBuilder;",
-        );
-        let append_int = cf.cp.add_methodref(
-            "java/lang/StringBuilder",
-            "append",
-            "(I)Ljava/lang/StringBuilder;",
-        );
-        let append_obj = cf.cp.add_methodref(
-            "java/lang/StringBuilder",
-            "append",
-            "(Ljava/lang/Object;)Ljava/lang/StringBuilder;",
-        );
-
-        let bytes = s.as_bytes();
-        let mut i = 0;
-        let mut literal_buf = String::new();
-
-        while i < bytes.len() {
-            if bytes[i] == b'$' && i + 1 < bytes.len() {
-                if !literal_buf.is_empty() {
-                    let str_idx = cf.cp.add_string(&literal_buf);
-                    code.ldc(str_idx);
-                    code.invokevirtual(append_str, 1, true);
-                    literal_buf.clear();
-                }
-
-                i += 1; // skip '$'
-                let var_name = if bytes[i] == b'{' {
-                    i += 1; // skip '{'
-                    let start = i;
-                    while i < bytes.len() && bytes[i] != b'}' {
-                        i += 1;
-                    }
-                    let name = std::str::from_utf8(&bytes[start..i]).unwrap_or("");
-                    if i < bytes.len() {
-                        i += 1; // skip '}'
-                    }
-                    name
-                } else {
-                    let start = i;
-                    while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                        i += 1;
-                    }
-                    std::str::from_utf8(&bytes[start..i]).unwrap_or("")
-                };
-
-                if let Some(&slot) = locals.get(var_name) {
-                    if self.is_int_var(var_name) {
-                        code.iload(slot);
-                        code.invokevirtual(append_int, 1, true);
-                    } else {
-                        code.aload(slot);
-                        code.invokevirtual(append_obj, 1, true);
-                    }
-                } else if self.is_in_class && self.current_class_fields.contains(&var_name.to_string()) {
-                    code.aload(0); // this
-                    let f_idx = cf.cp.add_fieldref(&self.current_class_name, var_name, "Ljava/lang/String;");
-                    code.getfield(f_idx);
-                    code.invokevirtual(append_str, 1, true);
-                } else {
-                    let empty_str = cf.cp.add_string("");
-                    code.ldc(empty_str);
-                    code.invokevirtual(append_str, 1, true);
-                }
-            } else {
-                literal_buf.push(bytes[i] as char);
-                i += 1;
-            }
-        }
-
-        if !literal_buf.is_empty() {
-            let str_idx = cf.cp.add_string(&literal_buf);
-            code.ldc(str_idx);
-            code.invokevirtual(append_str, 1, true);
-        }
-
-        let to_string = cf.cp.add_methodref(
-            "java/lang/StringBuilder",
-            "toString",
-            "()Ljava/lang/String;",
-        );
-        code.invokevirtual(to_string, 0, true);
-
-        Ok(())
-    }
-
-    fn compile_class_declaration(
-        &mut self,
-        c: &ClassDeclaration,
-        cf: &mut ClassFile,
-        package_prefix: &str,
-    ) -> Result<(), String> {
-        let class_internal_name = format!("{}{}", package_prefix, c.name.name);
-        self.current_class_name = class_internal_name.clone();
-        self.is_in_class = true;
-        self.current_class_fields.clear();
-
-        if c.kind == ClassKind::Interface {
-            cf.access_flags = 0x0601; // ACC_PUBLIC | ACC_INTERFACE | ACC_ABSTRACT
-            for inner in &c.declarations {
-                if let Declaration::Function(f) = inner {
-                    cf.add_method(0x0401, &f.name.name, "()V", None);
-                }
-            }
-            self.is_in_class = false;
-            return Ok(());
-        }
-
-        // Add interfaces implemented (e.g. Printable)
-        for st in &c.super_types {
-            let iface_name = match &st.type_ref {
-                TypeRef::User { name, .. } => format!("{}{}", package_prefix, name.to_string()),
-                _ => String::new(),
-            };
-            if !iface_name.is_empty() {
-                cf.add_interface(&iface_name);
-            }
-        }
-
-        // Add fields from primary constructor params
-        let mut param_types = Vec::new();
-        if let Some(params) = &c.primary_constructor_params {
-            for p in params {
-                self.current_class_fields.push(p.name.name.clone());
-                cf.add_field(0x0001 | 0x0010, &p.name.name, "Ljava/lang/String;");
-                param_types.push("Ljava/lang/String;");
-            }
-        }
-
-        // Constructor 1 (full parameter list)
-        let ctor_desc = format!("({})V", param_types.join(""));
-        let mut init_code = CodeBuilder::new();
-        init_code.aload(0);
-        let super_init = cf.cp.add_methodref("java/lang/Object", "<init>", "()V");
-        init_code.invokespecial(super_init, 0);
-
-        for (idx, p) in c.primary_constructor_params.as_ref().unwrap_or(&Vec::new()).iter().enumerate() {
-            init_code.aload(0);
-            init_code.aload((idx + 1) as u16);
-            let f_idx = cf.cp.add_fieldref(&class_internal_name, &p.name.name, "Ljava/lang/String;");
-            init_code.putfield(f_idx);
-        }
-        init_code.return_void();
-
-        cf.add_method(
-            0x0001, // ACC_PUBLIC
-            "<init>",
-            &ctor_desc,
-            Some(CodeAttr {
-                max_stack: 2,
-                max_locals: (param_types.len() + 1) as u16,
-                bytecode: init_code.bytes,
-            }),
-        );
-
-        // Compile member functions
-        for inner in &c.declarations {
-            if let Declaration::Function(f) = inner {
-                self.compile_member_function(f, cf)?;
-            }
-        }
-
-        self.is_in_class = false;
-        Ok(())
-    }
-
-    fn compile_member_function(
-        &mut self,
-        f: &NamedFunction,
-        cf: &mut ClassFile,
-    ) -> Result<(), String> {
-        let mut code = CodeBuilder::new();
-        let mut locals = HashMap::new();
-        locals.insert("this".to_string(), 0);
-        let mut next_slot = 1u16;
-
-        for p in &f.value_params {
-            locals.insert(p.name.name.clone(), next_slot);
-            next_slot += 1;
-        }
-
-        if let Some(body) = &f.body {
-            match body {
-                FunctionBody::Block(statements) => {
-                    for stmt in statements {
-                        self.compile_statement(stmt, &mut code, cf, &mut locals, &mut next_slot)?;
-                    }
-                    code.return_void();
-                }
-                FunctionBody::Expression(expr) => {
-                    self.compile_expression(expr, &mut code, cf, &mut locals, &mut next_slot)?;
-                    code.return_void();
-                }
-            }
-        } else {
-            code.return_void();
-        }
-
-        cf.add_method(
-            0x0001, // ACC_PUBLIC
-            &f.name.name,
-            "()V",
-            Some(CodeAttr {
-                max_stack: code.max_stack.max(4),
-                max_locals: code.max_locals.max(next_slot),
-                bytecode: code.bytes,
-            }),
-        );
-
-        Ok(())
     }
 }
 

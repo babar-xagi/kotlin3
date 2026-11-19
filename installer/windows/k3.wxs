@@ -3,7 +3,7 @@
   <Product Id="*"
            Name="Kotlin3 (k3) Compiler"
            Language="1033"
-           Version="0.6.0.0"
+           Version="0.6.1.0"
            Manufacturer="Kotlin3 Project"
            UpgradeCode="4E8A6E24-2C8B-4B7E-9730-9A74E51FE0B3">
     <Package InstallerVersion="200"

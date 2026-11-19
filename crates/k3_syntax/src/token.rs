@@ -180,11 +180,21 @@ pub enum TokenKind {
     #[regex(r"'(\\.|[^\\'\r\n])'")]
     CharLiteral,
 
-    #[regex(r#""(\\.|[^\\"\r\n])*""#)]
     StringLiteral,
 
-    #[regex(r#""""([^"]|"[^"]|""[^"])*""""#)]
     MultiLineStringLiteral,
+
+    // String template tokens
+    StringStart,
+    StringContent,
+    StringEnd,
+    TemplateExprStart,
+    TemplateExprEnd,
+
+    #[token(r#""""""#)]
+    TripleQuote,
+    #[token(r#"""#)]
+    Quote,
 
     // Punctuation & Operators
     #[token("(")]

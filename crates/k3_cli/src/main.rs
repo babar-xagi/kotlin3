@@ -11,7 +11,7 @@ use std::process::{self, Command};
 #[derive(Parser, Debug)]
 #[command(name = "k3")]
 #[command(author = "Kotlin3 Project")]
-#[command(version = "0.6.0")]
+#[command(version = "0.6.1")]
 #[command(about = "Ultra-fast, next-generation Kotlin compiler and toolchain written in Rust & Zig", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -253,7 +253,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let ir_file = compile_to_lowered_ir(&ast, file_name);
 
-            println!("✓ Successfully lowered {} into Universal Backend IR (k3_ir v0.6.0):", file.display());
+            println!("✓ Successfully lowered {} into Universal Backend IR (k3_ir v0.6.1):", file.display());
             println!("  Package:      {}", if ir_file.package_name.is_empty() { "<root>" } else { &ir_file.package_name });
             println!("  Declarations: {}", ir_file.declarations.len());
 

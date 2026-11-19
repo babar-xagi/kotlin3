@@ -7,6 +7,7 @@ pub enum CpEntry {
     Float(f32),
     Long(i64),
     Double(f64),
+    Dummy,
     Class(u16),
     String(u16),
     Fieldref { class_index: u16, name_and_type_index: u16 },
@@ -19,11 +20,14 @@ pub enum CpEntry {
 pub struct ConstantPool {
     entries: Vec<CpEntry>,
     utf8_map: HashMap<String, u16>,
+    int_map: HashMap<i32, u16>,
     class_map: HashMap<u16, u16>,
     string_map: HashMap<u16, u16>,
     nat_map: HashMap<(u16, u16), u16>,
     method_map: HashMap<(u16, u16), u16>,
     field_map: HashMap<(u16, u16), u16>,
+    long_map: HashMap<i64, u16>,
+    double_map: HashMap<u64, u16>,
 }
 
 impl ConstantPool {
@@ -31,11 +35,14 @@ impl ConstantPool {
         Self {
             entries: Vec::new(),
             utf8_map: HashMap::new(),
+            int_map: HashMap::new(),
             class_map: HashMap::new(),
             string_map: HashMap::new(),
             nat_map: HashMap::new(),
             method_map: HashMap::new(),
             field_map: HashMap::new(),
+            long_map: HashMap::new(),
+            double_map: HashMap::new(),
         }
     }
 
@@ -126,6 +133,39 @@ impl ConstantPool {
         self.entries.len() as u16
     }
 
+    pub fn add_integer(&mut self, val: i32) -> u16 {
+        if let Some(&idx) = self.int_map.get(&val) {
+            return idx;
+        }
+        let idx = (self.entries.len() + 1) as u16;
+        self.entries.push(CpEntry::Integer(val));
+        self.int_map.insert(val, idx);
+        idx
+    }
+
+    pub fn add_long(&mut self, val: i64) -> u16 {
+        if let Some(&idx) = self.long_map.get(&val) {
+            return idx;
+        }
+        let idx = (self.entries.len() + 1) as u16;
+        self.entries.push(CpEntry::Long(val));
+        self.entries.push(CpEntry::Dummy);
+        self.long_map.insert(val, idx);
+        idx
+    }
+
+    pub fn add_double(&mut self, val: f64) -> u16 {
+        let bits = val.to_bits();
+        if let Some(&idx) = self.double_map.get(&bits) {
+            return idx;
+        }
+        let idx = (self.entries.len() + 1) as u16;
+        self.entries.push(CpEntry::Double(val));
+        self.entries.push(CpEntry::Dummy);
+        self.double_map.insert(bits, idx);
+        idx
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         // Constant pool count is entries + 1 (1-indexed in JVM)
@@ -157,6 +197,7 @@ impl ConstantPool {
                     bytes.push(6); // Tag 6: Double
                     bytes.extend_from_slice(&val.to_be_bytes());
                 }
+                CpEntry::Dummy => {}
                 CpEntry::Class(name_idx) => {
                     bytes.push(7); // Tag 7: Class
                     bytes.extend_from_slice(&name_idx.to_be_bytes());

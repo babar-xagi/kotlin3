@@ -55,4 +55,46 @@ mod tests {
         // ZIP local header starts with PK\x03\x04
         assert_eq!(&bytes[0..4], &[0x50, 0x4b, 0x03, 0x04]);
     }
+
+    #[test]
+    fn test_constant_pool_large_integers_and_doubles() {
+        let mut cf = ClassFile::new("MathUtil", "java/lang/Object");
+        let i_idx = cf.cp.add_integer(2_000_000);
+        let l_idx = cf.cp.add_long(10_000_000_000);
+        let d_idx = cf.cp.add_double(1_000_000.0);
+
+        assert!(i_idx >= 1);
+        assert!(l_idx >= 1);
+        assert!(d_idx >= 1);
+
+        let bytes = cf.to_bytes();
+        assert_eq!(&bytes[0..4], &[0xCA, 0xFE, 0xBA, 0xBE]);
+    }
+
+    #[test]
+    fn test_compile_data_class_and_long_function() {
+        let source = r#"
+            data class Pair32(val first: Int, val second: Int)
+
+            fun calculate(count: Int): Pair32 {
+                var acc = 0L
+                var i = 0
+                while (i < count) {
+                    acc += i.toLong()
+                    i++
+                }
+                return Pair32(count, acc.toInt())
+            }
+        "#;
+        let mut lexer = k3_syntax::lexer::Lexer::new(source);
+        let tokens = lexer.tokenize().expect("tokenize failed");
+        let mut parser = k3_syntax::parser::Parser::new(tokens, source.len() as u32);
+        let file = parser.parse_file().expect("parse failed");
+
+        let classes = compile_to_classes(&file, "Test.kt").expect("compile failed");
+        assert_eq!(classes.len(), 2); // Pair32 and TestKt
+        for (name, bytes) in &classes {
+            assert_eq!(&bytes[0..4], &[0xCA, 0xFE, 0xBA, 0xBE], "class {} magic mismatch", name);
+        }
+    }
 }

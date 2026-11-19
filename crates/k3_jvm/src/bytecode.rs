@@ -64,6 +64,32 @@ impl CodeBuilder {
         self.push_stack(1);
     }
 
+    pub fn ldc2_w(&mut self, cp_index: u16) {
+        self.bytes.push(0x14); // ldc2_w
+        self.bytes.extend_from_slice(&cp_index.to_be_bytes());
+        self.push_stack(2);
+    }
+
+    pub fn lconst_0(&mut self) {
+        self.bytes.push(0x09);
+        self.push_stack(2);
+    }
+
+    pub fn lconst_1(&mut self) {
+        self.bytes.push(0x0a);
+        self.push_stack(2);
+    }
+
+    pub fn dconst_0(&mut self) {
+        self.bytes.push(0x0e);
+        self.push_stack(2);
+    }
+
+    pub fn dconst_1(&mut self) {
+        self.bytes.push(0x0f);
+        self.push_stack(2);
+    }
+
     pub fn iload(&mut self, slot: u16) {
         if slot > self.max_locals {
             self.max_locals = slot + 1;
@@ -82,7 +108,7 @@ impl CodeBuilder {
     }
 
     pub fn aload(&mut self, slot: u16) {
-        if slot > self.max_locals {
+        if slot >= self.max_locals {
             self.max_locals = slot + 1;
         }
         match slot {
@@ -92,6 +118,57 @@ impl CodeBuilder {
             3 => self.bytes.push(0x2d),
             _ => {
                 self.bytes.push(0x19);
+                self.bytes.push(slot as u8);
+            }
+        }
+        self.push_stack(1);
+    }
+
+    pub fn lload(&mut self, slot: u16) {
+        if slot + 1 >= self.max_locals {
+            self.max_locals = slot + 2;
+        }
+        match slot {
+            0 => self.bytes.push(0x1e),
+            1 => self.bytes.push(0x1f),
+            2 => self.bytes.push(0x20),
+            3 => self.bytes.push(0x21),
+            _ => {
+                self.bytes.push(0x16);
+                self.bytes.push(slot as u8);
+            }
+        }
+        self.push_stack(2);
+    }
+
+    pub fn dload(&mut self, slot: u16) {
+        if slot + 1 >= self.max_locals {
+            self.max_locals = slot + 2;
+        }
+        match slot {
+            0 => self.bytes.push(0x26),
+            1 => self.bytes.push(0x27),
+            2 => self.bytes.push(0x28),
+            3 => self.bytes.push(0x29),
+            _ => {
+                self.bytes.push(0x18);
+                self.bytes.push(slot as u8);
+            }
+        }
+        self.push_stack(2);
+    }
+
+    pub fn fload(&mut self, slot: u16) {
+        if slot >= self.max_locals {
+            self.max_locals = slot + 1;
+        }
+        match slot {
+            0 => self.bytes.push(0x22),
+            1 => self.bytes.push(0x23),
+            2 => self.bytes.push(0x24),
+            3 => self.bytes.push(0x25),
+            _ => {
+                self.bytes.push(0x17);
                 self.bytes.push(slot as u8);
             }
         }
@@ -132,9 +209,65 @@ impl CodeBuilder {
         self.pop_stack(1);
     }
 
+    pub fn lstore(&mut self, slot: u16) {
+        if slot + 1 >= self.max_locals {
+            self.max_locals = slot + 2;
+        }
+        match slot {
+            0 => self.bytes.push(0x3f),
+            1 => self.bytes.push(0x40),
+            2 => self.bytes.push(0x41),
+            3 => self.bytes.push(0x42),
+            _ => {
+                self.bytes.push(0x37);
+                self.bytes.push(slot as u8);
+            }
+        }
+        self.pop_stack(2);
+    }
+
+    pub fn dstore(&mut self, slot: u16) {
+        if slot + 1 >= self.max_locals {
+            self.max_locals = slot + 2;
+        }
+        match slot {
+            0 => self.bytes.push(0x47),
+            1 => self.bytes.push(0x48),
+            2 => self.bytes.push(0x49),
+            3 => self.bytes.push(0x4a),
+            _ => {
+                self.bytes.push(0x39);
+                self.bytes.push(slot as u8);
+            }
+        }
+        self.pop_stack(2);
+    }
+
+    pub fn fstore(&mut self, slot: u16) {
+        if slot >= self.max_locals {
+            self.max_locals = slot + 1;
+        }
+        match slot {
+            0 => self.bytes.push(0x43),
+            1 => self.bytes.push(0x44),
+            2 => self.bytes.push(0x45),
+            3 => self.bytes.push(0x46),
+            _ => {
+                self.bytes.push(0x38);
+                self.bytes.push(slot as u8);
+            }
+        }
+        self.pop_stack(1);
+    }
+
     pub fn dup(&mut self) {
         self.bytes.push(0x59);
         self.push_stack(1);
+    }
+
+    pub fn dup2(&mut self) {
+        self.bytes.push(0x5c);
+        self.push_stack(2);
     }
 
     pub fn iadd(&mut self) {
@@ -220,6 +353,22 @@ impl CodeBuilder {
     pub fn lxor(&mut self) {
         self.bytes.push(0x83);
         self.pop_stack(2);
+    }
+
+    pub fn ineg(&mut self) {
+        self.bytes.push(0x74);
+    }
+
+    pub fn lneg(&mut self) {
+        self.bytes.push(0x75);
+    }
+
+    pub fn fneg(&mut self) {
+        self.bytes.push(0x76);
+    }
+
+    pub fn dneg(&mut self) {
+        self.bytes.push(0x77);
     }
 
     pub fn iaload(&mut self) {
@@ -314,7 +463,121 @@ impl CodeBuilder {
 
     pub fn i2l(&mut self) {
         self.bytes.push(0x85);
-        self.push_stack(1); // Long takes 2 stack words
+        self.push_stack(1); // Long takes 2 stack words (net push 1)
+    }
+
+    pub fn l2i(&mut self) {
+        self.bytes.push(0x88);
+        self.pop_stack(1);
+    }
+
+    pub fn i2d(&mut self) {
+        self.bytes.push(0x87);
+        self.push_stack(1);
+    }
+
+    pub fn d2i(&mut self) {
+        self.bytes.push(0x8e);
+        self.pop_stack(1);
+    }
+
+    pub fn l2d(&mut self) {
+        self.bytes.push(0x8a);
+    }
+
+    pub fn d2l(&mut self) {
+        self.bytes.push(0x8f);
+    }
+
+    pub fn i2b(&mut self) {
+        self.bytes.push(0x91);
+    }
+
+    pub fn i2s(&mut self) {
+        self.bytes.push(0x93);
+    }
+
+    pub fn i2c(&mut self) {
+        self.bytes.push(0x92);
+    }
+
+    pub fn ladd(&mut self) {
+        self.bytes.push(0x61);
+        self.pop_stack(2);
+    }
+
+    pub fn lsub(&mut self) {
+        self.bytes.push(0x65);
+        self.pop_stack(2);
+    }
+
+    pub fn lmul(&mut self) {
+        self.bytes.push(0x69);
+        self.pop_stack(2);
+    }
+
+    pub fn ldiv(&mut self) {
+        self.bytes.push(0x6d);
+        self.pop_stack(2);
+    }
+
+    pub fn lrem(&mut self) {
+        self.bytes.push(0x71);
+        self.pop_stack(2);
+    }
+
+    pub fn lcmp(&mut self) {
+        self.bytes.push(0x94);
+        self.pop_stack(3);
+    }
+
+    pub fn dadd(&mut self) {
+        self.bytes.push(0x63);
+        self.pop_stack(2);
+    }
+
+    pub fn dsub(&mut self) {
+        self.bytes.push(0x67);
+        self.pop_stack(2);
+    }
+
+    pub fn dmul(&mut self) {
+        self.bytes.push(0x6b);
+        self.pop_stack(2);
+    }
+
+    pub fn ddiv(&mut self) {
+        self.bytes.push(0x6f);
+        self.pop_stack(2);
+    }
+
+    pub fn drem(&mut self) {
+        self.bytes.push(0x73);
+        self.pop_stack(2);
+    }
+
+    pub fn dcmpg(&mut self) {
+        self.bytes.push(0x98);
+        self.pop_stack(3);
+    }
+
+    pub fn dcmpl(&mut self) {
+        self.bytes.push(0x97);
+        self.pop_stack(3);
+    }
+
+    pub fn dreturn(&mut self) {
+        self.bytes.push(0xaf);
+        self.pop_stack(2);
+    }
+
+    pub fn laload(&mut self) {
+        self.bytes.push(0x2f);
+    }
+
+    pub fn lastore(&mut self) {
+        self.bytes.push(0x50);
+        self.pop_stack(4);
     }
 
     pub fn getfield(&mut self, cp_field_index: u16) {
@@ -398,6 +661,59 @@ impl CodeBuilder {
         self.bytes.extend_from_slice(&[0, 0]);
         self.pop_stack(1);
         placeholder
+    }
+
+    pub fn emit_iflt(&mut self) -> usize {
+        self.bytes.push(0x9b);
+        let placeholder = self.bytes.len();
+        self.bytes.extend_from_slice(&[0, 0]);
+        self.pop_stack(1);
+        placeholder
+    }
+
+    pub fn emit_ifge(&mut self) -> usize {
+        self.bytes.push(0x9c);
+        let placeholder = self.bytes.len();
+        self.bytes.extend_from_slice(&[0, 0]);
+        self.pop_stack(1);
+        placeholder
+    }
+
+    pub fn emit_ifgt(&mut self) -> usize {
+        self.bytes.push(0x9d);
+        let placeholder = self.bytes.len();
+        self.bytes.extend_from_slice(&[0, 0]);
+        self.pop_stack(1);
+        placeholder
+    }
+
+    pub fn emit_ifle(&mut self) -> usize {
+        self.bytes.push(0x9e);
+        let placeholder = self.bytes.len();
+        self.bytes.extend_from_slice(&[0, 0]);
+        self.pop_stack(1);
+        placeholder
+    }
+
+    pub fn emit_ifnull(&mut self) -> usize {
+        self.bytes.push(0xc6);
+        let placeholder = self.bytes.len();
+        self.bytes.extend_from_slice(&[0, 0]);
+        self.pop_stack(1);
+        placeholder
+    }
+
+    pub fn emit_ifnonnull(&mut self) -> usize {
+        self.bytes.push(0xc7);
+        let placeholder = self.bytes.len();
+        self.bytes.extend_from_slice(&[0, 0]);
+        self.pop_stack(1);
+        placeholder
+    }
+
+    pub fn athrow(&mut self) {
+        self.bytes.push(0xbf);
+        self.pop_stack(1);
     }
 
     pub fn emit_if_icmpeq(&mut self) -> usize {

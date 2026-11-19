@@ -297,6 +297,12 @@ impl Resolver {
             Expression::FloatLiteral(_, _) => ConeKotlinType::double(),
             Expression::BooleanLiteral(_, _) => ConeKotlinType::boolean(),
             Expression::StringLiteral(_, _) => ConeKotlinType::string(),
+            Expression::StringTemplate(parts, _) => {
+                for part in parts {
+                    self.resolve_expression(part, scope);
+                }
+                ConeKotlinType::string()
+            }
             Expression::NullLiteral(_) => ConeKotlinType::nothing().make_nullable(),
             Expression::This(_) => ConeKotlinType::any(false),
             Expression::Super(_) => ConeKotlinType::any(false),

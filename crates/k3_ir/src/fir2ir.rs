@@ -204,6 +204,10 @@ impl Fir2Ir {
                     IrExpression::ConstString(s.clone(), *span)
                 }
             }
+            Expression::StringTemplate(parts, span) => {
+                let ir_parts = parts.iter().map(|p| self.convert_expression(p)).collect();
+                IrExpression::StringTemplate(ir_parts, *span)
+            }
             Expression::NullLiteral(span) => IrExpression::ConstNull(*span),
             Expression::Identifier(id) => {
                 IrExpression::GetLocal(id.name.clone(), ConeKotlinType::any(true), id.span)
