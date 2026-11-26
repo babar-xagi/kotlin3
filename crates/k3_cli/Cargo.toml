@@ -13,5 +13,5 @@ k3_syntax = { path = "../k3_syntax" }
 k3_fir = { path = "../k3_fir" }
 k3_ir = { path = "../k3_ir" }
 k3_jvm = { path = "../k3_jvm" }
-k3_native = { path = "../k3_native" }
+k3_pkg = { path = "../k3_pkg" }
 clap = { workspace = true }

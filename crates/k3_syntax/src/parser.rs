@@ -103,6 +103,8 @@ impl<'a> Parser<'a> {
                 | TokenKind::Crossinline
                 | TokenKind::Noinline
                 | TokenKind::Reified
+                | TokenKind::Out
+                | TokenKind::Inner
                 | TokenKind::Dynamic
                 | TokenKind::Delegate
                 | TokenKind::Annotation
@@ -263,6 +265,10 @@ impl<'a> Parser<'a> {
     pub fn parse_modifiers(&mut self) -> Vec<Modifier> {
         let mut mods = Vec::new();
         while let Some(kind) = self.peek_kind() {
+            if kind == TokenKind::At {
+                self.skip_annotation();
+                continue;
+            }
             let m = match kind {
                 TokenKind::Public => Modifier::Public,
                 TokenKind::Private => Modifier::Private,
@@ -293,6 +299,40 @@ impl<'a> Parser<'a> {
             mods.push(m);
         }
         mods
+    }
+
+    fn skip_annotation(&mut self) {
+        self.advance(); // '@'
+        if self.peek_kind().is_some_and(|k| Self::is_identifier_like(&k)) {
+            self.advance();
+            if self.match_token(TokenKind::Colon).is_some()
+                && self.peek_kind().is_some_and(|k| Self::is_identifier_like(&k))
+            {
+                self.advance();
+            }
+            while self.match_token(TokenKind::Dot).is_some() {
+                if self.peek_kind().is_some_and(|k| Self::is_identifier_like(&k)) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        if self.check(TokenKind::LParen) {
+            let mut depth = 0usize;
+            while let Some(tok) = self.advance() {
+                match tok.kind {
+                    TokenKind::LParen => depth += 1,
+                    TokenKind::RParen => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     pub fn parse_function(&mut self, modifiers: Vec<Modifier>) -> Result<NamedFunction, ParseError> {
@@ -734,6 +774,7 @@ impl<'a> Parser<'a> {
                         "until" => Some(BinaryOp::Until),
                         "downTo" => Some(BinaryOp::DownTo),
                         "step" => Some(BinaryOp::Step),
+                        "to" | "zip" => Some(BinaryOp::Infix(tok.text.to_string())),
                         _ => None,
                     };
                     if let Some(bin_op) = infix_op {
@@ -767,7 +808,12 @@ impl<'a> Parser<'a> {
 
             self.advance(); // consume operator token
 
-            let rhs = self.parse_expr_bp(right_bp)?;
+            let rhs = if matches!(bin_op, BinaryOp::Is | BinaryOp::NotIs | BinaryOp::As | BinaryOp::AsSafe) {
+                let ty = self.parse_type()?;
+                Self::type_ref_to_expr(ty)
+            } else {
+                self.parse_expr_bp(right_bp)?
+            };
             let span = lhs.span().merge(rhs.span());
             lhs = Expression::Binary {
                 left: Box::new(lhs),
@@ -778,6 +824,18 @@ impl<'a> Parser<'a> {
         }
 
         Ok(lhs)
+    }
+
+    fn type_ref_to_expr(ty: TypeRef) -> Expression {
+        match ty {
+            TypeRef::User { name, span, .. } => {
+                Expression::Identifier(Ident::new(name.to_string(), span))
+            }
+            TypeRef::Nullable { inner, .. } => Self::type_ref_to_expr(*inner),
+            TypeRef::Function { span, .. } => {
+                Expression::Identifier(Ident::new("Function".to_string(), span))
+            }
+        }
     }
 
     fn infix_binding_power(kind: &TokenKind) -> Option<(u8, u8, BinaryOp)> {
@@ -1085,7 +1143,10 @@ impl<'a> Parser<'a> {
                         self.expect(TokenKind::TemplateExprEnd, "expected '}' after template expression")?;
                         parts.push(expr);
                     } else if let Some(content_tok) = self.match_token(TokenKind::StringContent) {
-                        parts.push(Expression::StringLiteral(content_tok.text.to_string(), content_tok.span));
+                        parts.push(Expression::StringLiteral(
+                            unescape_kotlin_string(content_tok.text),
+                            content_tok.span,
+                        ));
                     } else {
                         return Err(ParseError {
                             message: format!("unexpected token in string template: '{:?}'", self.peek_kind()),
@@ -1101,7 +1162,7 @@ impl<'a> Parser<'a> {
                 let unquoted = if tok.text.starts_with("\"\"\"") && tok.text.ends_with("\"\"\"") && tok.text.len() >= 6 {
                     tok.text[3..tok.text.len() - 3].to_string()
                 } else if tok.text.starts_with('"') && tok.text.ends_with('"') && tok.text.len() >= 2 {
-                    tok.text[1..tok.text.len() - 1].to_string()
+                    unescape_kotlin_string(&tok.text[1..tok.text.len() - 1])
                 } else {
                     tok.text.to_string()
                 };
@@ -1143,7 +1204,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Expression::Continue(tok.span))
             }
-            TokenKind::LBrace => self.parse_block(),
+            TokenKind::LBrace => self.parse_block_or_lambda(),
 
             _ => Err(ParseError {
                 message: format!("unexpected token in expression: '{:?}'", tok.kind),
@@ -1352,6 +1413,28 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_block_or_lambda(&mut self) -> Result<Expression, ParseError> {
+        let mut depth = 0usize;
+        let mut idx = self.cursor + 1;
+        while idx < self.tokens.len() {
+            match self.tokens[idx].kind {
+                TokenKind::LBrace => depth += 1,
+                TokenKind::RBrace => {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                }
+                TokenKind::Arrow if depth == 0 => {
+                    return self.parse_lambda();
+                }
+                _ => {}
+            }
+            idx += 1;
+        }
+        self.parse_block()
+    }
+
     pub fn parse_block(&mut self) -> Result<Expression, ParseError> {
         let lbrace = self.expect(TokenKind::LBrace, "expected '{'")?;
         let mut statements = Vec::new();
@@ -1464,6 +1547,32 @@ impl<'a> Parser<'a> {
             Ok(Statement::Expression(expr))
         }
     }
+}
+
+fn unescape_kotlin_string(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('"') => out.push('"'),
+                Some('\'') => out.push('\''),
+                Some('\\') => out.push('\\'),
+                Some('$') => out.push('$'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

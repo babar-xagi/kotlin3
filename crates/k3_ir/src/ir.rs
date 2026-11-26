@@ -239,6 +239,12 @@ pub enum IrExpression {
         span: Span,
     },
     StringTemplate(Vec<IrExpression>, Span),
+    Lambda {
+        params: Vec<String>,
+        body: Vec<IrStatement>,
+        return_type: ConeKotlinType,
+        span: Span,
+    },
     SuspendCall {
         callee: String,
         args: Vec<IrExpression>,
@@ -274,6 +280,7 @@ impl IrExpression {
             | IrExpression::Return { span: s, .. }
             | IrExpression::TypeOp { span: s, .. }
             | IrExpression::StringTemplate(_, s)
+            | IrExpression::Lambda { span: s, .. }
             | IrExpression::SuspendCall { span: s, .. }
             | IrExpression::StateSwitch { span: s, .. } => *s,
         }

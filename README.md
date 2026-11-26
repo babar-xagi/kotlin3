@@ -1,241 +1,127 @@
-# ⚡ Kotlin3 (k3)
+# Kotlin3 (`k3`) v0.7.0
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/babar-xagi/kotlin3/main/docs/assets/banner.png" alt="Kotlin3 Banner" width="700" onerror="this.style.display='none'"/>
-</p>
+A fast, **zero-Gradle, zero-Maven** Kotlin CLI, package manager, compiler frontend, and runtime written in **Rust and Kotlin** (inspired by `uv` and `bun`).
 
-<p align="center">
-  <b>Next-generation, ultra-fast Kotlin compiler and unified toolchain written in Rust, Zig, and Kotlin.</b>
-</p>
-
-<p align="center">
-  <a href="https://github.com/babar-xagi/kotlin3/actions"><img src="https://img.shields.io/badge/Build-Passing-brightgreen?style=flat-square" alt="Build Status"/></a>
-  <a href="https://github.com/babar-xagi/kotlin3/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square" alt="License"/></a>
-  <a href="ROADMAP.md"><img src="https://img.shields.io/badge/Roadmap-Phase%206%20Complete-brightgreen?style=flat-square" alt="Roadmap"/></a>
-  <a href="COMPARISON.md"><img src="https://img.shields.io/badge/Benchmark-Up%20to%203889x%20Faster-purple?style=flat-square" alt="Benchmark"/></a>
-  <a href="COMPARISON.md"><img src="https://img.shields.io/badge/Native%20Startup-0.59ms%20Latency-blue?style=flat-square" alt="Startup Latency"/></a>
-  <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin%20Compatibility-2.x%20K2-7F52FF?style=flat-square" alt="Kotlin Compatibility"/></a>
-</p>
+`k3` eliminates Gradle/Maven daemon overhead and multi-file build boilerplate with a single native CLI, declarative `k3.toml` + `k3.lock` dependency management, content-addressed JAR caching, a fast Rust direct-to-JVM bytecode path for standalone Kotlin subsets, seamless integration with official `kotlinc` (`2.4.21`), and a batteries-included Kotlin runtime (`k3.runtime` & `k3.test`).
 
 ---
 
-## 🚀 Overview
+## Why Kotlin3 (`k3`)?
 
-**Kotlin3 (`k3`)** is an independent, high-performance re-implementation of the Kotlin language compiler and toolchain. Engineered from the ground up in **Rust** and **Zig**, Kotlin3 eliminates the JVM warmup, high memory footprint, and daemon latency traditionally associated with Kotlin compilation while maintaining **100% language, ABI, and bytecode compatibility** with existing Kotlin code.
-
-### 🌟 Core Pillars
-* ⚡ **Blazing Speed**: Sub-millisecond cold start and up to **4,000x faster** cold syntax analysis than JVM `kotlinc`.
-* 📦 **Zero External Build Dependencies**: Single self-contained executable for compilation, execution, testing, and packaging (no mandatory Gradle or Maven daemon required).
-* 🛡️ **100% Kotlin 2.x Conformance**: Full alignment with JetBrains K2 (FIR) phased resolution, Cone types, Java bytecode (Java 8–25), and `.klib` packages.
-* 🌐 **Multiplatform First**: First-class JVM `.class`/`.jar` emission alongside ultra-compact native binaries via Zig's minimal runtime (< 2 MB).
-
----
-
-## 💾 Downloads & Official Installers
-
-Pre-built binaries and official installers for **Kotlin3 v0.6.0** are available directly from [GitHub Releases](https://github.com/babar-xagi/kotlin3/releases/tag/v0.6.0):
-
-| Platform | Format | Direct Download | Description |
-| :--- | :---: | :--- | :--- |
-| **Windows (x64)** | 📦 **MSI Installer** | [**`kotlin3-v0.6.0-windows-x64.msi`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.msi) | Full Windows installer (auto-configures `PATH`) |
-| **Windows (x64)** | 🗜️ Portable ZIP | [**`kotlin3-v0.6.0-windows-x64.zip`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.zip) | Standalone portable executable (`k3.exe`) |
-| **Linux (Debian / Ubuntu)** | 📦 **DEB Package** | [**`kotlin3_0.6.0_amd64.deb`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3_0.6.0_amd64.deb) | Native Debian package for Ubuntu / Debian |
-| **Linux (x86_64)** | 🗜️ Tarball | [**`kotlin3-v0.6.0-linux-x86_64.tar.gz`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-linux-x86_64.tar.gz) | Standalone binary archive (`k3`) |
-
-### 🪟 Windows Setup (MSI)
-1. Download [**`kotlin3-v0.6.0-windows-x64.msi`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.msi).
-2. Double-click the `.msi` file to install to `C:\Program Files\Kotlin3\bin\k3.exe` (or run silently: `msiexec /i kotlin3-v0.6.0-windows-x64.msi /quiet`).
-3. Open PowerShell or Command Prompt and test:
-   ```powershell
-   k3 --version
-   # Output: k3 0.6.0
-   ```
-
-### 🐧 Linux Setup (DEB / Tarball)
-```bash
-# Option 1: Install via DEB package on Ubuntu / Debian
-curl -LO https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3_0.6.0_amd64.deb
-sudo dpkg -i kotlin3_0.6.0_amd64.deb
-
-# Option 2: Extract standalone tarball
-curl -LO https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-linux-x86_64.tar.gz
-tar -xzf kotlin3-v0.6.0-linux-x86_64.tar.gz
-sudo mv k3 /usr/local/bin/
-
-k3 --version
-# Output: k3 0.6.0
-```
+- **Zero Gradle / Zero Maven**: Replace `build.gradle.kts`, `settings.gradle.kts`, `gradle-wrapper.properties`, and XML `pom.xml` build scripts with a clean 10-line `k3.toml` and deterministic SHA-256 `k3.lock`.
+- **Single-Binary Workflow (`uv` / `bun` style)**:
+  - `k3 init`, `k3 add <group:artifact[:version]>`, `k3 remove`, `k3 sync`
+  - `k3 run` (cached builds, `--fast` or `--kotlinc`, named `[scripts]`)
+  - `k3 build` (thin JARs or self-contained `--fat` uber-JARs with merged `META-INF/services`)
+  - `k3 test` (discovers `tests/**/*.kt` and runs `k3.test`)
+  - `k3 check` (fast Rust K2-style FIR semantic checker, or `--strict` for `kotlinc`)
+  - `k3 toolchain` / `k3 cache` / `k3 info`
+- **Dual Compilation Engine**:
+  - **Fast Rust Direct JVM Compiler (`--fast` / auto fast-path)**: `k3_syntax -> k3_fir -> k3_jvm` compiles supported single-file JVM Kotlin subsets in **~1.7–4.0 ms** with `java -Xverify:all`-verified Java 11 classfiles.
+  - **Full Kotlin 2.4.21 Engine (`--kotlinc` / automatic for projects, imports, & Maven deps)**: Automatically delegates multi-file projects, full Kotlin stdlib/generics/coroutines, `k3-runtime`, and Maven Central dependencies to `kotlinc` with SHA-256 content-addressed caching under `~/.k3/cache`.
+- **Batteries-Included Kotlin Runtime (`runtime/`)**:
+  - `k3.runtime`: `K3Env`, `K3Time`, `K3Fs`, `K3Process`, `K3Http`, `K3Async` (Java virtual threads), `K3Json`
+  - `k3.test`: `runTests`, `test`, `expectEquals`, `expectTrue`, `expectThrows`
 
 ---
 
-## 🏎️ Performance at a Glance
+## Quick Start
 
-Live verified comparison between **JetBrains Kotlin K2 (`kotlinc-jvm 2.4.21` on OpenJDK 25)** and **Kotlin3 (`k3 0.6.0`)** compiling to JVM JARs and standalone native executables:
+### 1. Prerequisites & Toolchains
 
-| Benchmark Example | JetBrains `kotlinc` (K2) | Kotlin3 `k3 build` (JVM) | Kotlin3 `k3 native` (Binary) | Compile Speedup | Native Exec Latency | Exec Speedup | Output Match |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **01. Hello World** | 6,922 ms | **1.78 ms** | 326 ms | **3,889x faster** 🚀 | **0.59 ms** | **98.7x faster** ⚡ | ✅ 100% Match |
-| **02. Control Flow & When** | 6,116 ms | **1.73 ms** | 317 ms | **3,530x faster** 🚀 | **0.78 ms** | **121.9x faster** ⚡ | ✅ 100% Match |
-| **03. Classes & OOP** | 5,641 ms | **1.85 ms** | 292 ms | **3,045x faster** 🚀 | **0.63 ms** | **123.2x faster** ⚡ | ✅ 100% Match |
-| **04. Lambdas & Collections** | 5,597 ms | **1.73 ms** | 318 ms | **3,231x faster** 🚀 | **0.67 ms** | **137.7x faster** ⚡ | ✅ 100% Match |
-| **05. Coroutines** | 5,136 ms | **2.19 ms** | 218 ms | **2,349x faster** 🚀 | **0.61 ms** | **112.9x faster** ⚡ | ✅ 100% Match |
-
-### 🧮 Compute Intensive Workload Benchmark (ALU, Memory, Sieve, Matrix, Fractal)
-
-Executed over **5 consecutive runs** with 20M ALU iterations, 10M random-access array mutations, 5M prime sieve, 192x192 matrix multiplication, and 640x360 Mandelbrot fractal:
-
-| Workload Metric | Official Kotlin K2 (2.4.21) | Kotlin3 `k3` (v0.6.0) | Speedup / Advantage | Output Conformance |
-| :--- | :---: | :---: | :---: | :---: |
-| **Cold Compilation** | `7,033.1 ms` | **`3.28 ms`** | **⚡ 2,144x Faster** | ✅ Identical Bytecode |
-| **Compiler Memory** | `~340 MB` | **`< 12 MB`** | **🍃 28x Less RAM** | — |
-| **Emitted JAR Size** | `5,615 KB` | **`4.4 KB`** | **📦 Zero-bloat Archive** | — |
-| **ALU (20M iters)** | `87.1 ms` | `87.1 ms` | 1.0x (HotSpot parity) | `850514577:3659208163` |
-| **Memory (10M iters)** | `119.9 ms` | `119.9 ms` | 1.0x (HotSpot parity) | `3257893589:564826105` |
-| **Sieve (5M primes)** | `38.1 ms` | `38.1 ms` | 1.0x (HotSpot parity) | `348513:838596693108` |
-| **Matrix (192x192)** | `21.2 ms` | `21.2 ms` | 1.0x (HotSpot parity) | `398131200` |
-| **Fractal (640x360)** | `57.7 ms` | `57.7 ms` | 1.0x (HotSpot parity) | `58365:12353477` |
-| **Total Pipeline** | **`343.5 ms`** | **`343.5 ms`** | 100% Numerical Parity | ✅ 100% Match |
-
-> 📊 Run yourself with `./scripts/run.sh` or see full reports in [benchmark.md](benchmark.md) and [comparison.md](comparison.md).
-
----
-
-## 🏛️ Architecture
-
-```mermaid
-flowchart TD
-    subgraph Toolchain ["🚀 Toolchain & Driver (Zig)"]
-        CLI["k3 CLI Entrypoint (build, run, test, check, parse)"]
-        ZigBuild["build.zig Toolchain Orchestrator"]
-        NativeRT["Minimal Native Runtime (< 2 MB)"]
-        CInterop["Zig C-Interop (@cImport / LibClang)"]
-    end
-
-    subgraph Compiler ["🦀 Compiler Engine (Rust)"]
-        Lexer["k3_syntax: SIMD Zero-Copy Lexer"]
-        Parser["k3_syntax: Pratt Expression & AST Parser"]
-        FIR["k3_fir: K2 Phased Resolution & Cone Types"]
-        IR["k3_ir: Backend Universal IR & Lowerings"]
-        JVM["k3_jvm: JVM Bytecode & Classfile Writer"]
-    end
-
-    CLI --> Lexer --> Parser --> FIR --> IR --> JVM
-    IR --> NativeRT
-    ZigBuild --> CLI
-    CInterop --> NativeRT
-```
-
-* **Rust Engine**: High-speed, borrow-checked semantic analysis, Pratt parsing, K2 FIR resolution phases, Cone types, and JVM classfile generation.
-* **Zig Driver & Runtime**: Lightweight CLI driver, cross-compilation toolchain, arena memory management, and native runtime without JVM overhead.
-* **Kotlin Standard Library**: Pure Kotlin standard library and self-hosting bootstrap interface.
-
----
-
-## 📂 Repository Structure
-
-```
-kotlin3/
-├── crates/                       # Rust Compiler Engine Crates
-│   ├── k3_syntax/                # Lexer, Tokens, AST, and Pratt Parser
-│   ├── k3_fir/                   # K2 FIR & Cone Kotlin Type System
-│   ├── k3_ir/                    # Backend Intermediate Representation & Lowerings
-│   ├── k3_jvm/                   # JVM Classfile Binary & JAR Emitter
-│   ├── k3_native/                # Zig Native Backend & Standalone Linker
-│   └── k3_cli/                   # Unified `k3` Command Line Interface
-├── runtime/                      # Zig Native Driver & Embedded Runtime
-│   ├── src/runtime.zig           # Minimal Native Runtime (< 1 MB, no-alloc I/O)
-│   └── src/main.zig              # `k3-driver` toolchain orchestrator
-├── examples/                     # Verified Kotlin example programs
-│   ├── 01_hello_world/           # Basic syntax & string templates
-│   ├── 02_control_flow/          # When expressions & loops
-│   ├── 03_classes_and_interfaces/# Data classes & inheritance
-│   ├── 04_lambdas_and_collections/# Generics & higher-order functions
-│   └── 05_coroutines/            # Suspend functions & coroutine signatures
-├── docs/                         # In-depth architectural & user documentation
-│   ├── user_guide.md             # Comprehensive User Guide & Step-by-Step Tutorials
-│   ├── architecture.md           # Deep dive into system layers
-│   ├── toolchain.md              # CLI manual and target compilation
-│   ├── compatibility.md          # Kotlin 2.x K2 specification parity
-│   └── contributing.md           # Developer setup & guidelines
-├── scripts/                      # Benchmark and utility scripts
-├── ROADMAP.md                    # Detailed milestone roadmap
-├── CHANGELOG.md                  # Semantic versioning changelog
-├── COMPARISON.md                 # K2 vs Kotlin3 comparative benchmarks
-└── build.zig                     # Zig master build script
-```
-
----
-
-## 🛠️ Getting Started
-
-> 📖 New to Kotlin3? Read the **[Comprehensive User Guide & Tutorials](docs/user_guide.md)** for step-by-step walkthroughs, examples, and CLI flags.
-
-### Prerequisites
-* **Rust**: `1.100+` (`rustup update`)
-* **Zig**: `0.17+`
-* **Python**: `3.10+` (for running comparison benchmarks)
-
-### Building from Source
+Install Rust (`cargo`), OpenJDK (Temurin 25 LTS tested), and Kotlin `2.4.21`, or inspect/install managed toolchains directly via `k3`:
 
 ```bash
-# 1. Clone repository
-git clone git@github.com:babar-xagi/kotlin3.git
-cd kotlin3
-
-# 2. Build and test Rust compiler crates
+# Build k3 CLI
 cargo build --release
-cargo test --workspace
 
-# 3. Build native Zig toolchain driver
-zig build
+# Install k3 on PATH (optional)
+mkdir -p ~/.local/bin
+cp target/release/k3 ~/.local/bin/k3
+
+# Check or install JDK & Kotlin compiler into ~/.k3/toolchains
+k3 toolchain status
+k3 toolchain install
 ```
 
-### Using the CLI (`k3`)
+### 2. Run a Single Kotlin File Instantly
 
 ```bash
-# Compile Kotlin source into a standalone native binary (< 1 MB ELF)
-./target/release/k3 native examples/01_hello_world/main.kt -o /tmp/hello_bin
-/tmp/hello_bin
+k3 run examples/01_hello_world/main.kt
+k3 build --fast examples/02_control_flow/main.kt -o /tmp/control_flow.jar
+java -Xverify:all -jar /tmp/control_flow.jar
+```
 
-# Compile and immediately run Kotlin code (sub-millisecond native startup by default)
-./target/release/k3 run examples/02_control_flow/main.kt
+### 3. Create & Run a Zero-Gradle Project
 
-# Compile and run via JVM bytecode
-./target/release/k3 run examples/02_control_flow/main.kt --jvm
+```bash
+k3 init my-app
+cd my-app
+k3 check
+k3 run
+k3 test
 
-# Compile Kotlin source into a standalone runnable JAR
-./target/release/k3 build examples/01_hello_world/main.kt -o /tmp/app.jar
-java -jar /tmp/app.jar
+# Add a Maven Central dependency (locks SHA-256 into k3.lock)
+k3 add org.json:json
 
-# Lower Kotlin AST into Universal Backend IR with coroutines CPS and default stubs
-./target/release/k3 ir examples/05_coroutines/main.kt
+# Build a standalone runnable uber-JAR
+k3 build --fat -o dist/my-app.jar
+java -jar dist/my-app.jar
+```
 
-# Fast semantic type-checking and DFA analysis
-./target/release/k3 check examples/04_lambdas_and_collections/main.kt
+Example [`examples/06_k3_project_and_runtime/k3.toml`](examples/06_k3_project_and_runtime/k3.toml):
 
-# Parse a Kotlin file and inspect the AST
-./target/release/k3 parse examples/02_control_flow/main.kt
+```toml
+[package]
+name = "k3-demo"
+version = "0.7.0"
+kotlin = "2.4.21"
+entry = "src/Main.kt"
 
-# Tokenize source with SIMD lexer
-./target/release/k3 lex samples/hello.kt
+[dependencies]
+
+[scripts]
+demo = "src/Main.kt"
 ```
 
 ---
 
-## 🗺️ Roadmap & Phases
+## Workspace Architecture
 
-- [x] **Phase 1: Foundations** — SIMD zero-copy Lexer, K2 FIR skeleton, Zig driver (`v0.1.0`)
-- [x] **Phase 2: Full Pratt Parser & AST** — Expressions, Declarations, Types, Generics (`v0.2.0`)
-- [x] **Phase 3: K2 Scope Resolution & Cone Types** — Phased symbol resolution & DFA smart-casts (`v0.3.0`)
-- [x] **Phase 4: JVM Bytecode & JAR Packager** — Direct `.class` emitter & standalone `.jar` generation (`v0.4.0`)
-- [x] **Phase 5: Backend IR & Composable Lowerings** — Coroutine CPS state machines & default stubs (`v0.5.0`)
-- [x] **Phase 6: Zig Native Backend & Runtime** — Standalone ELF binaries (< 1 MB) & sub-ms startup (`v0.6.0`)
-- [ ] **Phase 7: KLib Ecosystem & Self-Hosting** — Full `.klib` packages and Kotlin3 compiles itself (`v1.0.0`)
+`kotlin3` is organized strictly in **Rust** and **Kotlin**:
 
-> 📖 See [ROADMAP.md](ROADMAP.md) for the complete phase breakdown.
+| Component | Language | Purpose |
+| :--- | :--- | :--- |
+| [`crates/k3_syntax`](crates/k3_syntax) | Rust | `logos` lexer (with string interpolation & triple quotes) and Pratt/recursive-descent Kotlin AST parser |
+| [`crates/k3_fir`](crates/k3_fir) | Rust | Multi-file K2-style Frontend IR resolver, subtyping, smart-cast DFA, suspend/return/abstract checkers |
+| [`crates/k3_ir`](crates/k3_ir) | Rust | Universal Backend IR and lowering passes (`inlining`, `default_args`, `coroutines`) |
+| [`crates/k3_jvm`](crates/k3_jvm) | Rust | Direct JVM `.class` bytecode & runnable JAR emitter (Java 11 classfile v55, synthetic lambda classes, exception tables) |
+| [`crates/k3_pkg`](crates/k3_pkg) | Rust | `k3.toml` manifest, `k3.lock` lockfile, Maven Central POM/metadata resolver, SHA-256 verifier, fat-JAR builder, toolchain/cache manager |
+| [`crates/k3_cli`](crates/k3_cli) | Rust | Unified `k3` binary (`clap`) routing fast-path, `kotlinc`, caching, tests, and package management |
+| [`runtime/`](runtime) | Kotlin | `k3.runtime` and `k3.test` standard utilities compiled and cached into `k3-runtime.jar` |
 
 ---
 
-## 📄 License
+## Verification & Benchmarks
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+Verified on Linux x86_64 with OpenJDK `25.0.5.1+2-LTS` (Temurin) and Kotlin `2.4.21`:
+
+- **Rust workspace unit tests** (`cargo test --workspace --offline`): **27 passed, 0 failed** (`k3_syntax`: 6, `k3_fir`: 7, `k3_ir`: 3, `k3_jvm`: 5, `k3_pkg`: 6).
+- **Kotlin runtime tests** (`cd runtime && k3 test`): **5 passed, 0 failed** (`62.63`–`84.70 ms`).
+- **Project example workflow** (`examples/06_k3_project_and_runtime`): `k3 check --strict`, `k3 run`, `k3 test` (1/1 passed), and `k3 build --fat` (5.5 MB runnable fat JAR verified with `java -Xverify:all -jar`).
+- **Examples `01`–`05` parity (`benchmark_compare.py`)**: All 5 examples pass `java -Xverify:all` with identical stdout to `kotlinc 2.4.21`, compiling in **1.75–3.94 ms** via `k3 --fast` vs **4707–5193 ms** via cold `kotlinc -include-runtime`.
+- **Compute benchmark (`benches/compute_benchmark.kt`)**: Median compile **2.63 ms** (`k3 --fast`, `7.4 KB` pure-JDK JAR) vs **6460.5 ms** (`kotlinc 2.4.21`, `5615.0 KB` runtime-bundled JAR); median runtime **306.02 ms** (`k3 --fast`) vs **343.51 ms** (`kotlinc 2.4.21`) with identical checksums across ALU, memory, sieve, matrix, and fractal tests.
+
+See [benchmark.md](benchmark.md), [COMPARISON.md](COMPARISON.md), and the [docs/](docs/user_guide.md) directory for details.
+
+---
+
+## Documentation
+
+- [User Guide](docs/user_guide.md)
+- [Architecture Overview](docs/architecture.md)
+- [CLI & Toolchain Reference](docs/toolchain.md)
+- [Compatibility Matrix](docs/compatibility.md)
+- [Error Codes Reference](docs/errors.md)
+- [Benchmarks (`benchmark.md`)](benchmark.md) & [Compiler Comparison (`COMPARISON.md`)](COMPARISON.md)
+- [Contributing](docs/contributing.md), [Changelog](CHANGELOG.md), and [Roadmap](ROADMAP.md)

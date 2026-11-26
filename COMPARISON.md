@@ -1,135 +1,58 @@
-# 📊 Compiler Benchmark & Compatibility Comparison: Kotlin K2 vs Kotlin3 (k3)
+# Compiler & Build Comparison: `k3 0.7.0` vs Official `kotlinc 2.4.21` / Gradle
 
-This report tracks verified side-by-side execution and performance comparisons between the official JetBrains Kotlin K2 compiler (`kotlinc-jvm 2.4.21` on OpenJDK 25) and **Kotlin3 (`k3 0.6.0`)** written in Rust and Zig.
+All measurements below were recorded on Linux x86_64 with **OpenJDK 25.0.5.1+2-LTS (Eclipse Temurin)** and **Kotlin `2.4.21`** using [`scripts/benchmark_compare.py`](scripts/benchmark_compare.py) and [`scripts/benchmark_runner.py`](scripts/benchmark_runner.py). All generated JARs were executed with strict bytecode verification (`java -Xverify:all -jar ...`).
 
 ---
 
-## ⚡ Execution Environment
+## 1. Workflow & Project Overhead Comparison
 
-| Parameter | JetBrains Kotlin (K2) | Kotlin3 (`k3 build` JVM) | Kotlin3 (`k3 native` Zig) |
+| Aspect | Gradle + Kotlin | Maven + Kotlin | Kotlin3 (`k3 0.7.0`) |
 | :--- | :--- | :--- | :--- |
-| **Compiler Version** | `kotlinc-jvm 2.4.21` | `k3 0.6.0` (Rust) | `k3 0.6.0` (Rust & Zig 0.17.1) |
-| **Target Runtime** | OpenJDK 64-Bit `25.0.5` | OpenJDK 64-Bit `25.0.5` | Standalone ELF x86_64 Native Binary |
-| **Operating System** | Linux / Ubuntu 26.04 (WSL2) | Linux / Ubuntu 26.04 (WSL2) | Linux / Ubuntu 26.04 (WSL2) |
-| **Optimization** | Standard JVM JIT | In-memory classfile synthesis | `-O ReleaseFast` (LLVM LTO) |
-| **External Runtime** | Required (JVM + stdlib ~20MB) | Required (JVM) | **Zero (Embedded < 1MB Native RT)** |
+| **Config Files Required** | `build.gradle.kts`, `settings.gradle.kts`, `gradlew`, `gradle-wrapper.properties`, `.jar` | `pom.xml`, `mvnw` / system Maven | `k3.toml` (+ auto-generated `k3.lock`) |
+| **Single-File Script / Run** | Needs full Gradle project setup | Needs `pom.xml` setup | `k3 run file.kt` (~2 ms `--fast` or cached `kotlinc`) |
+| **Dependency Add & Lock** | Manual edit + Gradle sync | Manual XML edit | `k3 add group:artifact` (POM resolve + SHA-256 lock) |
+| **Built-in Runtime & Tests** | Requires manual test/JSON/HTTP deps | Requires manual test/JSON/HTTP deps | Bundled `k3.runtime` + `k3.test` (`k3 test`) |
+| **Fast Subset Compiler** | Always runs full JVM compiler / daemon | Always runs full JVM compiler | `k3 --fast` (~1.7–4.0 ms) or auto `--kotlinc` fallback |
 
 ---
 
-## 🏎️ Phase 6 Native & JVM Compilation Benchmark Results
+## 2. Example Suite (`examples/01`–`05`): `kotlinc 2.4.21` vs `k3 --fast`
 
-Live measurements from automated benchmark suite `scripts/benchmark_compare.py`:
+Measured by [`scripts/benchmark_compare.py`](scripts/benchmark_compare.py):
+- **Baseline (`kotlinc 2.4.21`)**: `kotlinc <file> -include-runtime -d out.jar` (cold invocation, bundles Kotlin stdlib ~5.6 MB)
+- **Kotlin3 (`k3 --fast`)**: `k3 build <file> --fast -o out.jar` (direct Rust JVM classfile emitter targeting Java stdlib)
 
-| Benchmark Suite | Source File | JetBrains `kotlinc` (K2) | Kotlin3 `k3 build` (JVM) | Kotlin3 `k3 native` (Binary) | Compile Speedup | Output Match |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **01. Hello World** | `examples/01_hello_world/main.kt` | 6,922.21 ms | **1.78 ms** | 326.52 ms | **3,888.9x faster** 🚀 | ✅ 100% Match |
-| **02. Control Flow & When** | `examples/02_control_flow/main.kt` | 6,116.35 ms | **1.73 ms** | 317.31 ms | **3,530.4x faster** 🚀 | ✅ 100% Match |
-| **03. Classes & OOP** | `examples/03_classes_and_interfaces/main.kt` | 5,641.30 ms | **1.85 ms** | 292.36 ms | **3,045.4x faster** 🚀 | ✅ 100% Match |
-| **04. Lambdas & Collections** | `examples/04_lambdas_and_collections/main.kt` | 5,596.63 ms | **1.73 ms** | 317.88 ms | **3,230.6x faster** 🚀 | ✅ 100% Match |
-| **05. Coroutines** | `examples/05_coroutines/main.kt` | 5,136.05 ms | **2.19 ms** | 217.52 ms | **2,349.3x faster** 🚀 | ✅ 100% Match |
+| Example | `kotlinc` Compile (ms) | `k3 --fast` Compile (ms) | Speedup | `kotlinc` Exec (ms) | `k3 --fast` Exec (ms) | `kotlinc` JAR (KB) | `k3 --fast` JAR (KB) | Output Match |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `01_Hello_World` | 4706.80 | **1.94** | **2430.8x** | 157.81 | 155.80 | 5606.33 | **1.00** | `true` |
+| `02_Control_Flow` | 4864.09 | **1.96** | **2486.9x** | 177.56 | 120.27 | 5606.87 | **1.71** | `true` |
+| `03_Classes_and_OOP` | 5186.49 | **2.27** | **2286.9x** | 174.38 | 120.41 | 5608.64 | **2.54** | `true` |
+| `04_Lambdas_and_Collections` | 5193.35 | **1.75** | **2960.4x** | 191.99 | 126.54 | 5607.76 | **2.44** | `true` |
+| `05_Coroutines` | 4911.65 | **3.94** | **1247.5x** | 152.21 | 118.24 | 5606.53 | **1.02** | `true` |
 
-```mermaid
-xychart-beta
-    title "Cold Compilation Time to Executable (milliseconds) - Lower is Faster"
-    x-axis ["Hello World", "Control Flow", "Classes/OOP", "Lambdas", "Coroutines"]
-    y-axis "Time (ms)" 0 --> 7500
-    bar [6922, 6116, 5641, 5597, 5136]
-    bar [1.8, 1.7, 1.9, 1.7, 2.2]
-```
+> [!NOTE]
+> Why the JAR size difference? `kotlinc -include-runtime` bundles `kotlin-stdlib` (~5.6 MB) into the standalone JAR. `k3 --fast` emits pure-JDK bytecode (`1.0`–`2.5 KB`) backed directly by JVM standard library classes. When packaging full Kotlin projects with dependencies and `k3-runtime`, `k3 build --fat` also bundles `kotlin-stdlib` + `k3-runtime` (measured at **5.5 MB** on `examples/06_k3_project_and_runtime`).
 
 ---
 
-## ⚡ Runtime Execution Performance & Memory Footprint
+## 3. Compute Kernel Suite (`benches/compute_benchmark.kt`)
 
-Measuring cold process launch to termination:
-- **JVM Execution**: Launching `java -jar <archive.jar>` on OpenJDK 25.
-- **Kotlin3 Native Execution**: Launching the standalone ELF binary directly (`./<bin>`).
+5-run median with strict JVM verification (`java -Xverify:all`):
 
-| Benchmark Suite | JetBrains JVM Exec | Kotlin3 Native Exec | Execution Speedup | Native Binary Footprint | JVM Dependency |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **01. Hello World** | 57.97 ms | **0.59 ms** | **98.7x faster** ⚡ | **988 KB** | ❌ None |
-| **02. Control Flow & When** | 95.28 ms | **0.78 ms** | **121.9x faster** ⚡ | **992 KB** | ❌ None |
-| **03. Classes & OOP** | 77.72 ms | **0.63 ms** | **123.2x faster** ⚡ | **984 KB** | ❌ None |
-| **04. Lambdas & Collections** | 92.17 ms | **0.67 ms** | **137.7x faster** ⚡ | **992 KB** | ❌ None |
-| **05. Coroutines** | 68.69 ms | **0.61 ms** | **112.9x faster** ⚡ | **977 KB** | ❌ None |
+| Metric | `kotlinc 2.4.21` (`-include-runtime`) | `k3 0.7.0` (`--fast`) |
+| :--- | :---: | :---: |
+| **Compile Median** | 6460.5 ms | **2.63 ms** |
+| **Output JAR Size** | 5615.0 KB | **7.4 KB** |
+| **Total Kernel Exec Median** | 343.51 ms | **306.02 ms** |
 
-```mermaid
-xychart-beta
-    title "Process Execution & Startup Latency (milliseconds) - Lower is Faster"
-    x-axis ["Hello World", "Control Flow", "Classes/OOP", "Lambdas", "Coroutines"]
-    y-axis "Latency (ms)" 0 --> 100
-    bar [58.0, 95.3, 77.7, 92.2, 68.7]
-    bar [0.59, 0.78, 0.63, 0.67, 0.61]
-```
+### Per-Workload Breakdown & Checksums
 
----
+| Workload | Checksum Match | `kotlinc 2.4.21` (ms) | `k3 --fast` (ms) |
+| :--- | :--- | :---: | :---: |
+| `alu` (20M iters) | `850514577:3659208163` | 84.97 | 83.99 |
+| `memory` (10M iters, 1M elems) | `3257893589:564826105` | 106.67 | 108.94 |
+| `sieve` (limit 5,000,000) | `348513:838596693108` | 35.59 | 35.08 |
+| `matrix` (192x192 int matmul) | `398131200` | 16.35 | 16.99 |
+| `fractal` (640x360 x 192 iters) | `58365:12353477` | 58.39 | 57.78 |
 
-## 🔬 Execution Output Conformance Validation
-
-All binaries and JARs were executed in Ubuntu 26.04 (WSL2). Outputs match **byte-for-byte** across all 3 targets:
-1. `kotlinc-jvm 2.4.21` (JetBrains K2 on Java 25)
-2. `k3 build` runnable JAR (Kotlin3 JVM target)
-3. `k3 native` standalone binary (Kotlin3 Zig Native target)
-
-### 1. `examples/01_hello_world/main.kt`
-```
-Welcome to Kotlin3 v0.1.0!
-Engineered in Rust & Zig for up to 50x compilation speed.
-```
-
-### 2. `examples/02_control_flow/main.kt`
-```
-One (Integer)
-Greeting
-Long integer of value 1000
-Not a string
-Counting: 1 2 3 4 5 
-```
-
-### 3. `examples/03_classes_and_interfaces/main.kt`
-```
-Developer: Alice | Role: Compiler Engineer | Primary Language: Rust
-Developer: Bob | Role: Runtime Architect | Primary Language: Zig
-```
-
-### 4. `examples/04_lambdas_and_collections/main.kt`
-```
-Original: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-Evens:    [2, 4, 6, 8, 10]
-Doubled:  [4, 8, 12, 16, 20]
-```
-
-### 5. `examples/05_coroutines/main.kt`
-```
-Coroutines transform suspend functions into state-machines.
-Kotlin3 lowers these in k3_ir via AddContinuationLowering.
-```
-
----
-
-## 🔍 Detailed Architectural Analysis
-
-### 1. Sub-Millisecond Native Execution (0.59 ms)
-- **Direct Kernel Syscalls**: Output printing bypasses heavy C runtime buffering and standard library layers, invoking `sys_write` directly via `std.os.linux.write`.
-- **Zero JVM Initialization Overhead**: Standard JVM programs take 50–100ms just to initialize HotSpot, load `rt.jar` / base modules, and initialize classloaders. `k3 native` binaries jump immediately to machine code entrypoint.
-- **Embedded No-Alloc List Engine**: Slices and collections operate with zero heap overhead using stack buffers and fixed-buffer string formatters.
-
-### 2. Standalone Binary Footprint (< 1 MB)
-- Official Kotlin/Native binaries bundle an entire LLVM runtime and garbage collector, often exceeding 35 MB for simple programs.
-- Kotlin3's Zig native runtime is **under 1 MB (977 KB – 992 KB)**, producing ultra-compact, statically linkable ELF executables that boot instantly.
-
-### 3. In-Memory Compiler Self-Containment
-- The Zig Native Runtime (`runtime/src/runtime.zig`) is embedded directly into the `k3` Rust binary using `include_str!`.
-- Compiling to native requires no external downloads or complex SDK setups; `k3 native` seamlessly coordinates with Zig to emit optimized machine code.
-
----
-
-## 🧪 Reproducing the Benchmarks
-
-```bash
-# 1. Build optimized k3 compiler binary
-cargo build --release
-
-# 2. Run automated comparative benchmark
-python3 scripts/benchmark_compare.py
-```
+**Takeaway**: On supported JVM compute kernels, `k3 --fast` compiles **~2,450x faster** than cold `kotlinc 2.4.21` while emitting standard verified JVM bytecode that matches `kotlinc`'s HotSpot JIT execution speed (~306 ms vs ~344 ms) and exact checksums. For multi-file projects, Maven dependencies, or full Kotlin stdlib/coroutine features, `k3` seamlessly uses `kotlinc 2.4.21` with SHA-256 content-addressed caching under `~/.k3/cache`.

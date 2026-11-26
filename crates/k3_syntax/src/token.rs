@@ -191,9 +191,9 @@ pub enum TokenKind {
     TemplateExprStart,
     TemplateExprEnd,
 
-    #[token(r#""""""#)]
+    #[token("\"\"\"")]
     TripleQuote,
-    #[token(r#"""#)]
+    #[token("\"")]
     Quote,
 
     // Punctuation & Operators

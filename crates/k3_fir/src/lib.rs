@@ -8,7 +8,7 @@ pub use cone_types::{ConeKotlinType, ConeNullability, ConeProjection};
 pub use symbols::{ClassSymbol, FunctionSymbol, PropertySymbol, Scope, VariableSymbol};
 pub use diagnostics::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 pub use dfa::DfaState;
-pub use resolution::{analyze, Resolver};
+pub use resolution::{analyze, analyze_files, Resolver};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FirResolvePhase {

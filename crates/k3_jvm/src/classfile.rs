@@ -253,10 +253,30 @@ pub struct MethodInfo {
 }
 
 #[derive(Debug, Clone)]
+pub struct ExceptionHandler {
+    pub start_pc: u16,
+    pub end_pc: u16,
+    pub handler_pc: u16,
+    pub catch_type: u16,
+}
+
+#[derive(Debug, Clone)]
 pub struct CodeAttr {
     pub max_stack: u16,
     pub max_locals: u16,
     pub bytecode: Vec<u8>,
+    pub exception_table: Vec<ExceptionHandler>,
+}
+
+impl CodeAttr {
+    pub fn new(max_stack: u16, max_locals: u16, bytecode: Vec<u8>) -> Self {
+        Self {
+            max_stack,
+            max_locals,
+            bytecode,
+            exception_table: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -376,8 +396,9 @@ impl ClassFile {
                 body_bytes.extend_from_slice(&1u16.to_be_bytes());
                 body_bytes.extend_from_slice(&code_utf8_idx.to_be_bytes());
 
-                // Attribute length = 2 (max_stack) + 2 (max_locals) + 4 (code_length) + code.len() + 2 (exception_table_length) + 2 (attributes_count)
-                let attr_len = (2 + 2 + 4 + code.bytecode.len() + 2 + 2) as u32;
+                // Attribute length = 2 (max_stack) + 2 (max_locals) + 4 (code_length) + code.len() + 2 (exception_table_length) + 8*handlers + 2 (attributes_count)
+                let exc_bytes = code.exception_table.len() * 8;
+                let attr_len = (2 + 2 + 4 + code.bytecode.len() + 2 + exc_bytes + 2) as u32;
                 body_bytes.extend_from_slice(&attr_len.to_be_bytes());
                 body_bytes.extend_from_slice(&code.max_stack.to_be_bytes());
                 body_bytes.extend_from_slice(&code.max_locals.to_be_bytes());
@@ -386,8 +407,14 @@ impl ClassFile {
                 body_bytes.extend_from_slice(&code_len.to_be_bytes());
                 body_bytes.extend_from_slice(&code.bytecode);
 
-                // Exception table length = 0
-                body_bytes.extend_from_slice(&0u16.to_be_bytes());
+                let exc_count = code.exception_table.len() as u16;
+                body_bytes.extend_from_slice(&exc_count.to_be_bytes());
+                for handler in &code.exception_table {
+                    body_bytes.extend_from_slice(&handler.start_pc.to_be_bytes());
+                    body_bytes.extend_from_slice(&handler.end_pc.to_be_bytes());
+                    body_bytes.extend_from_slice(&handler.handler_pc.to_be_bytes());
+                    body_bytes.extend_from_slice(&handler.catch_type.to_be_bytes());
+                }
                 // Code sub-attributes count = 0
                 body_bytes.extend_from_slice(&0u16.to_be_bytes());
             } else {

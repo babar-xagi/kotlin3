@@ -1,125 +1,53 @@
-# 🚨 Kotlin3 (k3) Diagnostic Error Codes & Troubleshooting Guide
+# Kotlin3 Error Codes & Diagnostics Reference
 
-Kotlin3 provides structured, machine-parsable error codes (prefixed with `[E....]`) accompanied by clear explanations, root cause analysis, and actionable remediation steps.
-
----
-
-## 📋 Error Code Catalog
-
-| Error Code | Category | Name | Summary |
-|---|---|---|---|
-| [`[E0001]`](#e0001---zig-native-compiler-not-found) | Toolchain | Zig Native Compiler Not Found | Attempted standalone `.exe`/native compilation without Zig installed |
-| [`[E0002]`](#e0002---cli-argument-or-flag-syntax-mismatch) | CLI | CLI Argument Syntax Mismatch | Provided unrecognized or incorrectly positioned CLI options |
-| [`[E0010]`](#e0010---io-filesystem-access-error) | Filesystem | File I/O Access Error | Could not read or write file due to permissions or lock |
-| [`[E0020]`](#e0020---codegen-failure) | Compiler | Codegen Synthesis Error | Failure during JVM bytecode or Native IR generation |
-| [`[E0030]`](#e0030---java-runtime-environment-not-found) | Runtime | Java Runtime Not Found | JVM execution requested but no Java runtime (JBR/JDK) detected |
-| [`[E0112]`](#e0112---storage-full--disk-exhaustion) | Filesystem | Storage Full / Disk Exhaustion | Operating system reported zero available storage space on disk |
+Kotlin3 (`k3 0.7.0`) emits structured CLI errors (`[E0010]`, `[E0030]`, `[E0031]`, `[E0112]`), lexer/syntax diagnostics (`k3_syntax`), semantic FIR diagnostics (`k3_fir`), and package/Maven resolver errors (`k3_pkg`).
 
 ---
 
-## 🔍 Detailed Explanations & Actionable Solutions
+## Toolchain & I/O Error Codes
 
-### `[E0001]` - Zig Native Compiler Not Found
+### `[E0010]` File Not Found / I/O Error
+Emitted when a target `.kt` file, project directory, or output path cannot be opened, read, or written.
 
-#### ⚠️ Symptoms
-```
-❌ Native compilation error:
-[E0001] Zig Native Compiler Not Found
+- **Common Causes**: Typo in source path, running `k3 check` / `k3 run` without arguments outside a `k3.toml` directory, or insufficient permissions on the destination directory.
+- **Resolution**: Verify the file path or run `k3 init` in an empty directory first.
 
-Explanation: 'k3 native' compiles Kotlin directly into standalone native machine-code executables using Zig's zero-dependency linker.
-```
+### `[E0030]` Java Runtime Environment (JRE) Not Found
+Emitted when `java` cannot be found across `JAVA_HOME`, `~/.k3/toolchains/jdk`, `~/.local/opt/jdk`, `~/.local/bin`, `~/.sdkman`, or `PATH`.
 
-#### 💡 Root Cause
-You invoked `k3 native <file.kt>` or `k3 run --native <file.kt>`, which compiles Kotlin code directly to standalone, zero-JVM native machine binaries (`.exe` on Windows, ELF on Linux, Mach-O on macOS). Kotlin3 uses the lightweight Zig cross-linker instead of a bloated 2 GB LLVM toolchain. If Zig (`zig.exe` or `zig`) is not found in your system `PATH`, this diagnostic is raised.
+- **Resolution**: Run `k3 toolchain install`, set `JAVA_HOME`, or install OpenJDK 21+ / 25 LTS and add `java` to `PATH`.
 
-#### 🛠️ Actionable Solutions
-- **Option A (Zero-dependency JVM execution)**: You **do not** need Zig if you simply want to build or run Kotlin programs. Use:
-  ```powershell
-  # Auto-detects JVM and runs in < 2ms without Zig
-  k3 run app.kt
+### `[E0031]` Kotlin Compiler (`kotlinc`) Not Found
+Emitted when a project, `import`, `--kotlinc`, `--strict`, `--fat`, or `k3 test` invocation requires `kotlinc` and no Kotlin installation can be located across `KOTLIN_HOME`, `~/.k3/toolchains/kotlinc`, `~/.local/opt/kotlinc`, `~/.local/bin`, `~/.sdkman`, or `PATH`.
 
-  # Or build a standard runnable JAR
-  k3 build app.kt -o app.jar
-  java -jar app.jar
-  ```
-- **Option B (Install Zig for standalone native `.exe` generation)**:
-  - **Windows (Winget)**:
-    ```powershell
-    winget install zig.zig
-    ```
-  - **Windows (Direct Download)**: Download from [ziglang.org/download](https://ziglang.org/download/) and extract to `C:\zig` (already auto-scanned by `k3`).
-  - **Linux (Ubuntu/Debian)**:
-    ```bash
-    sudo snap install zig --classic --beta
-    # or download from https://ziglang.org/download/
-    ```
+- **Resolution**: Run `k3 toolchain install` (installs latest JetBrains `kotlinc` + Temurin JDK into `~/.k3/toolchains`), or set `KOTLIN_HOME`.
+
+### `[E0112]` Storage Full
+Emitted when the OS reports `ENOSPC` / `StorageFull` while writing JARs, lockfiles, or cache entries.
+
+- **Resolution**: Free disk space or run `k3 cache clean` to reclaim space under `~/.k3/cache`.
 
 ---
 
-### `[E0002]` - CLI Argument or Flag Syntax Mismatch
+## Semantic Frontend Diagnostics (`k3_fir`)
 
-#### ⚠️ Symptoms
-```
-error: unexpected argument '-o' found
-  tip: to pass '-o' as a value, use '-- -o'
-Usage: k3.exe run [OPTIONS] <FILE>
-```
+`k3 check` and `--fast` builds run `k3_fir` before bytecode emission and render line/column underlines for:
 
-#### 💡 Root Cause
-Older releases of `k3 run` only accepted the source file without the optional output file flag `-o` / `--output`.
-
-#### 🛠️ Actionable Solutions
-Update to Kotlin3 `v0.6.0+` where `-o` is fully supported on both `k3 build` and `k3 run`:
-```powershell
-# Compile and immediately run, saving compiled output:
-k3 run app.kt -o app.jar
-
-# Or simply build without running:
-k3 build app.kt -o app.jar
-```
+| Diagnostic | Meaning |
+| :--- | :--- |
+| `Unresolved reference: '<name>'` | Identifier, function, or class could not be resolved in current file, sibling `src/` project files, or known imports (`k3.runtime`, `k3.test`). |
+| `Type mismatch: inferred type is '<A>' but '<B>' was expected` | Value or expression return type is not a subtype of expected type. |
+| `Val cannot be reassigned: '<name>'` | Reassigning an immutable `val` binding; change to `var` if mutation is intended. |
+| `Condition must be of type 'Boolean', found '<T>'` | Non-boolean condition passed to `if`, `while`, or `!`. |
+| `Wrong number of arguments: expected N, found M` | Too few or too many arguments supplied to a function or primary constructor call. |
+| `Conflicting declaration: '<name>'` | Duplicate class, top-level property, or matching-signature function in the same scope. |
+| `Cannot infer type for '<name>', please specify type explicitly` | Variable or property declared without initializer or explicit type annotation. |
+| `Suspend function '<name>' should be called only from a coroutine or another suspend function` | Calling a `suspend fun` from a regular non-`suspend` function body. |
+| `Class '<C>' is not abstract and does not implement abstract member '<m>'` | Concrete class implements an `interface` without defining one of its abstract methods. |
 
 ---
 
-### `[E0112]` - Storage Full / Disk Exhaustion
+## Package & Maven Errors (`k3_pkg`)
 
-#### ⚠️ Symptoms
-```
-Error: Os { code: 112, kind: StorageFull, message: "There is not enough space on the disk." }
-```
-
-#### 💡 Root Cause
-Windows OS error code 112 (`ERROR_DISK_FULL`) indicates the target drive (e.g., `C:`) or temporary directory has run out of physical disk space (`0.00 GB free`). Kotlin3 cannot write compilation artifacts, JAR files, or cache entries.
-
-#### 🛠️ Actionable Solutions
-1. Check free space using PowerShell:
-   ```powershell
-   Get-PSDrive C | Select-Object Used, Free
-   ```
-2. Free up disk space by clearing temporary folders:
-   ```powershell
-   Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
-   ```
-3. Empty the Windows Recycle Bin or remove large unused files. Once free space is above 1 GB, rerun `k3 build app.kt`.
-
----
-
-### `[E0030]` - Java Runtime Environment Not Found
-
-#### ⚠️ Symptoms
-```
-❌ [E0030] Java Runtime Not Found: 'java' could not be located to execute .jar files.
-```
-
-#### 💡 Root Cause
-`k3 run <file.kt>` built the program into JVM bytecode, but neither `java.exe` in `PATH`, nor `JAVA_HOME`, nor JetBrains IDE JBR (`C:\Program Files\JetBrains\IntelliJ IDEA...\jbr\bin\java.exe`) was found on your system.
-
-#### 🛠️ Actionable Solutions
-1. Install OpenJDK on Windows via Winget:
-   ```powershell
-   winget install Microsoft.OpenJDK.21
-   ```
-2. Or set `JAVA_HOME` pointing to your existing JDK directory:
-   ```powershell
-   [Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Eclipse Adoptium\jdk-21-hotspot", "User")
-   ```
-3. Alternatively, compile to standalone native executable using Zig (`winget install zig.zig`) to bypass Java completely!
+- **Invalid coordinate**: `k3 add` expects `group:artifact` or `group:artifact:version` (e.g., `org.json:json`).
+- **Download / SHA-256 verification failure**: `k3 sync` / `k3 add` verifies `k3.lock` hashes against downloaded JARs. Re-run `k3 sync --refresh` if upstream coordinates or network connectivity changed.

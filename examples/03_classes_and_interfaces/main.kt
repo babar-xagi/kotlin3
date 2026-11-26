@@ -18,7 +18,7 @@ data class Developer(
 
 fun main() {
     val dev1 = Developer("Alice", "Compiler Engineer", "Rust")
-    val dev2 = Developer("Bob", "Runtime Architect", "Zig")
+    val dev2 = Developer("Bob", "Runtime Architect", "Kotlin")
 
     val team = listOf(dev1, dev2)
     for (member in team) {

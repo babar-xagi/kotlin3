@@ -4,7 +4,7 @@ members = [
     "crates/k3_fir",
     "crates/k3_ir",
     "crates/k3_jvm",
-    "crates/k3_native",
+    "crates/k3_pkg",
     "crates/k3_cli",
 ]
 resolver = "2"

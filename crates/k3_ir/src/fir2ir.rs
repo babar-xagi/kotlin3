@@ -209,9 +209,58 @@ impl Fir2Ir {
                 IrExpression::StringTemplate(ir_parts, *span)
             }
             Expression::NullLiteral(span) => IrExpression::ConstNull(*span),
+            Expression::This(span) => {
+                IrExpression::GetLocal("this".to_string(), ConeKotlinType::any(false), *span)
+            }
             Expression::Identifier(id) => {
                 IrExpression::GetLocal(id.name.clone(), ConeKotlinType::any(true), id.span)
             }
+            Expression::Unary { op, expr, span, .. } => {
+                let inner_ir = self.convert_expression(expr);
+                let callee_name = match op {
+                    UnaryOp::Neg => "unaryMinus",
+                    UnaryOp::Pos => "unaryPlus",
+                    UnaryOp::Not => "not",
+                    UnaryOp::Inc => "inc",
+                    UnaryOp::Dec => "dec",
+                };
+                IrExpression::Call {
+                    callee: callee_name.to_string(),
+                    receiver: Some(Box::new(inner_ir)),
+                    args: vec![],
+                    return_type: ConeKotlinType::any(true),
+                    is_inline: false,
+                    span: *span,
+                }
+            }
+            Expression::MemberAccess { target, member, span, .. } => {
+                let target_ir = self.convert_expression(target);
+                IrExpression::GetField {
+                    receiver: Some(Box::new(target_ir)),
+                    class_name: "".to_string(),
+                    field_name: member.name.clone(),
+                    field_type: ConeKotlinType::any(true),
+                    span: *span,
+                }
+            }
+            Expression::IndexAccess { target, indices, span } => {
+                let target_ir = self.convert_expression(target);
+                let args = indices.iter().map(|i| self.convert_expression(i)).collect();
+                IrExpression::Call {
+                    callee: "get".to_string(),
+                    receiver: Some(Box::new(target_ir)),
+                    args,
+                    return_type: ConeKotlinType::any(true),
+                    is_inline: false,
+                    span: *span,
+                }
+            }
+            Expression::Lambda { params, body, span } => IrExpression::Lambda {
+                params: params.iter().map(|p| p.name.clone()).collect(),
+                body: body.iter().map(|s| self.convert_statement(s)).collect(),
+                return_type: ConeKotlinType::any(true),
+                span: *span,
+            },
             Expression::Binary { left, op, right, span } => {
                 let left_ir = self.convert_expression(left);
                 let right_ir = self.convert_expression(right);

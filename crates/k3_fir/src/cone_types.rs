@@ -220,7 +220,15 @@ impl ConeKotlinType {
                 return false;
             }
 
-            if actual_name == exp_name {
+            let is_collection_subtype = (actual_name == "kotlin.collections.MutableList"
+                && matches!(exp_name.as_str(), "kotlin.collections.List" | "kotlin.collections.Collection" | "kotlin.collections.Iterable"))
+                || (actual_name == "kotlin.collections.List"
+                    && matches!(exp_name.as_str(), "kotlin.collections.Collection" | "kotlin.collections.Iterable"))
+                || (actual_name == "kotlin.collections.MutableSet"
+                    && matches!(exp_name.as_str(), "kotlin.collections.Set" | "kotlin.collections.Collection" | "kotlin.collections.Iterable"))
+                || (actual_name == "kotlin.collections.MutableMap" && exp_name == "kotlin.collections.Map");
+
+            if actual_name == exp_name || is_collection_subtype {
                 if actual_args.len() != exp_args.len() {
                     return true;
                 }

@@ -1,396 +1,137 @@
-# 📖 Kotlin3 (`k3`) Compiler User Guide & Tutorials
+# Kotlin3 (`k3`) User Guide
 
-Welcome to the comprehensive user guide for **Kotlin3 (`k3`)**, the ultra-fast, zero-dependency Kotlin compiler and standalone toolchain engineered in **Rust** and **Zig**.
-
-This manual covers everything you need to compile, run, debug, and package Kotlin applications using the `k3` toolchain for both the **JVM** and **Zig Native** targets.
+Welcome to **Kotlin3 (`k3 0.7.0`)**, a single-binary CLI, package manager, compiler, and runtime for Kotlin built in **Rust & Kotlin** with zero Gradle and zero Maven.
 
 ---
 
-## 📑 Table of Contents
+## 1. Installing Toolchains & Building `k3`
 
-1. [Introduction & Architectural Highlights](#-introduction--architectural-highlights)
-2. [Installation & Prerequisites](#-installation--prerequisites)
-3. [Quick Start in 60 Seconds](#-quick-start-in-60-seconds)
-4. [Command-Line Interface (CLI) Reference](#-command-line-interface-cli-reference)
-5. [In-Depth Code Tutorials](#-in-depth-code-tutorials)
-   - [Tutorial 1: Hello World & String Interpolation](#tutorial-1-hello-world--string-interpolation)
-   - [Tutorial 2: Pattern Matching & Smart Casts with `when`](#tutorial-2-pattern-matching--smart-casts-with-when)
-   - [Tutorial 3: Object-Oriented Programming & Data Classes](#tutorial-3-object-oriented-programming--data-classes)
-   - [Tutorial 4: Lambdas, Higher-Order Functions & Collections](#tutorial-4-lambdas-higher-order-functions--collections)
-   - [Tutorial 5: Suspend Functions & Coroutines CPS Lowerings](#tutorial-5-suspend-functions--coroutines-cps-lowerings)
-6. [Compilation Targets: JVM vs Native](#-compilation-targets-jvm-vs-native)
-7. [Benchmarking & Comparative Verification](#-benchmarking--comparative-verification)
-8. [Troubleshooting & Frequently Asked Questions](#-troubleshooting--frequently-asked-questions)
+### Prerequisites
+- Rust (`cargo` / `rustc`)
+- `curl` (used for Maven Central / toolchain downloads when needed)
 
----
-
-## 🌟 Introduction & Architectural Highlights
-
-Kotlin3 (`k3`) solves the longstanding cold startup and resource consumption challenges of the standard Kotlin toolchain. It provides:
-
-* ⚡ **Sub-Millisecond Execution**: Native binaries start in **0.59 ms**, up to **137x faster** than JVM cold execution.
-* 🚀 **Unmatched Cold Compilation Speed**: Compiles Kotlin source up to **3,800x faster** than official `kotlinc` K2 (`~1.7 ms` vs `~6,500 ms`).
-* 📦 **Minimal Binary Footprint**: Emits standalone, self-contained native ELF binaries under **1 MB (< 990 KB)** with zero external dependencies.
-* ☕ **Full JVM Compatibility**: Generates standard JVM bytecode and executable `.jar` archives compatible with Java 5 through Java 25.
-* 🛡️ **100% Kotlin 2.x Conformance**: Full fidelity with Kotlin K2 specifications, Cone types, and data-flow smart casts.
-
----
-
-## 🛠️ Installation & Prerequisites
-
-### System Requirements
-* **Operating System**: Linux (Ubuntu 22.04+ / Debian / Fedora / Arch) or Windows Subsystem for Linux (WSL2).
-* **Rust**: `1.85+` or `1.100+` (`rustup update`).
-* **Zig**: `0.17+` (pre-installed at `/opt/zig/zig` or added to system `PATH`).
-* **Java (Optional for JVM target)**: OpenJDK 8, 11, 17, 21, or 25.
-
-### Pre-Built Packages & Installers (Recommended)
-
-Official releases can be downloaded directly from [GitHub Releases](https://github.com/babar-xagi/kotlin3/releases/tag/v0.6.0):
-
-* **Windows x64 (.msi)**: [**`kotlin3-v0.6.0-windows-x64.msi`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.msi)
-  * Double-click to install or run `msiexec /i kotlin3-v0.6.0-windows-x64.msi /quiet`. Automatically adds `k3.exe` to system `PATH`.
-* **Windows x64 (.zip)**: [**`kotlin3-v0.6.0-windows-x64.zip`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-windows-x64.zip)
-  * Portable binary archive containing `k3.exe`.
-* **Linux Debian/Ubuntu (.deb)**: [**`kotlin3_0.6.0_amd64.deb`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3_0.6.0_amd64.deb)
-  * Install via `sudo dpkg -i kotlin3_0.6.0_amd64.deb`.
-* **Linux x86_64 (.tar.gz)**: [**`kotlin3-v0.6.0-linux-x86_64.tar.gz`**](https://github.com/babar-xagi/kotlin3/releases/download/v0.6.0/kotlin3-v0.6.0-linux-x86_64.tar.gz)
-  * Extract and copy `k3` to `/usr/local/bin/`.
-
-### Building from Source
+Build and install `k3`:
 
 ```bash
-# 1. Clone the repository
-git clone git@github.com:babar-xagi/kotlin3.git
+git clone https://github.com/babar-xagi/kotlin3.git
 cd kotlin3
-
-# 2. Build the optimized compiler binary
 cargo build --release
-
-# 3. Verify test suite
-cargo test --workspace
-
-# 4. (Optional) Symlink to your local bin path
-sudo ln -sf $(pwd)/target/release/k3 /usr/local/bin/k3
+mkdir -p ~/.local/bin
+cp target/release/k3 ~/.local/bin/k3
 ```
 
-Verify your installation:
+Check for existing JDK & Kotlin installations, or install OpenJDK 25 + latest Kotlin compiler automatically into `~/.k3/toolchains`:
+
 ```bash
-k3 --version
-# Output: k3 0.6.0
+k3 toolchain status
+k3 toolchain install
 ```
+
+Verified configuration:
+- **JDK**: Eclipse Temurin OpenJDK `25.0.5.1+2-LTS`
+- **Kotlin**: JetBrains Kotlin `2.4.21`
 
 ---
 
-## ⚡ Quick Start in 60 Seconds
+## 2. Running Single-File Kotlin Programs
 
-Create a file named `hello.kt`:
+Run standalone `.kt` files directly with zero project files:
 
-```kotlin
-fun main() {
-    val name = "Kotlin3 Developer"
-    println("Hello, $name! Welcome to next-gen compilation.")
-}
-```
-
-### Option A: Run Natively (Sub-millisecond launch)
 ```bash
-# Compiles and runs immediately as a native machine-code binary
-k3 run hello.kt
-```
-
-### Option B: Build a Standalone Native Binary (< 1 MB)
-```bash
-# Compile to standalone native executable using Zig
-k3 native hello.kt -o hello_bin
-
-# Execute the native binary directly
-./hello_bin
-```
-
-### Option C: Build a Runnable JVM JAR
-```bash
-# Compile to a runnable Java archive (.jar)
-k3 build hello.kt -o hello.jar
-
-# Run on any standard Java Virtual Machine
-java -jar hello.jar
-```
-
----
-
-## 💻 Command-Line Interface (CLI) Reference
-
-The `k3` CLI provides commands for every step of development and inspection:
-
-```
-k3 <SUBCOMMAND> [OPTIONS] <FILE.kt>
-```
-
-### Subcommands Matrix
-
-| Subcommand | Purpose | Key Flags | Example |
-| :--- | :--- | :--- | :--- |
-| `native` | Compiles Kotlin directly to a standalone native binary | `-o, --output <PATH>` | `k3 native app.kt -o /tmp/app` |
-| `run` | Compiles and runs code immediately | `--jvm` (use JVM target) | `k3 run app.kt` or `k3 run app.kt --jvm` |
-| `build` | Compiles Kotlin source to an executable JVM `.jar` | `-o, --output <PATH>` | `k3 build app.kt -o app.jar` |
-| `ir` | Lowers AST to Universal Backend IR and prints tree | — | `k3 ir app.kt` |
-| `check` | Performs syntax, semantic, and Cone type checks | — | `k3 check app.kt` |
-| `parse` | Parses Kotlin source and prints the Abstract Syntax Tree | — | `k3 parse app.kt` |
-| `lex` | Runs SIMD lexer and prints stream of tokens | — | `k3 lex app.kt` |
-
----
-
-## 📚 In-Depth Code Tutorials
-
-All tutorials below are verified and available in the `examples/` directory.
-
-### Tutorial 1: Hello World & String Interpolation
-
-Source: `examples/01_hello_world/main.kt`
-
-```kotlin
-package examples.hello
-
-fun main() {
-    val language = "Kotlin3"
-    val version = "0.1.0"
-    val speedMultiplier = 50
-
-    println("Welcome to $language v$version!")
-    println("Engineered in Rust & Zig for up to ${speedMultiplier}x compilation speed.")
-}
-```
-
-#### Running & Compiling:
-```bash
-# 1. Check semantics & types
-k3 check examples/01_hello_world/main.kt
-
-# 2. Build standalone native executable
-k3 native examples/01_hello_world/main.kt -o /tmp/ex01_bin
-/tmp/ex01_bin
-
-# Output:
-# Welcome to Kotlin3 v0.1.0!
-# Engineered in Rust & Zig for up to 50x compilation speed.
-```
-
----
-
-### Tutorial 2: Pattern Matching & Smart Casts with `when`
-
-Source: `examples/02_control_flow/main.kt`
-
-Demonstrates Kotlin's expressive `when` expression, type checking (`is Long`, `!is String`), smart casts, and range loops:
-
-```kotlin
-package examples.controlflow
-
-fun describe(obj: Any): String = when (obj) {
-    1          -> "One (Integer)"
-    "Hello"    -> "Greeting"
-    is Long    -> "Long integer of value $obj"
-    !is String -> "Not a string"
-    else       -> "Unknown object"
-}
-
-fun main() {
-    println(describe(1))
-    println(describe("Hello"))
-    println(describe(1000L))
-    println(describe(3.14159))
-
-    // Range loops
-    print("Counting: ")
-    for (i in 1..5) {
-        print("$i ")
-    }
-    println()
-}
-```
-
-#### Running & Compiling:
-```bash
-k3 run examples/02_control_flow/main.kt
-
-# Output:
-# One (Integer)
-# Greeting
-# Long integer of value 1000
-# Not a string
-# Counting: 1 2 3 4 5
-```
-
----
-
-### Tutorial 3: Object-Oriented Programming & Data Classes
-
-Source: `examples/03_classes_and_interfaces/main.kt`
-
-Demonstrates interface declaration, data class primary constructors, default parameters, member function invocation, and collection iteration:
-
-```kotlin
-package examples.oop
-
-interface Printable {
-    fun printDetails()
-}
-
-data class Developer(
-    val name: String,
-    val role: String,
-    val primaryLanguage: String = "Kotlin"
-) : Printable {
-    override fun printDetails() {
-        println("Developer: $name | Role: $role | Primary Language: $primaryLanguage")
-    }
-}
-
-fun main() {
-    val dev1 = Developer("Alice", "Compiler Engineer", "Rust")
-    val dev2 = Developer("Bob", "Runtime Architect", "Zig")
-
-    val team = listOf(dev1, dev2)
-    for (member in team) {
-        member.printDetails()
-    }
-}
-```
-
-#### Running & Compiling:
-```bash
-# Compile to native binary (< 1 MB footprint)
-k3 native examples/03_classes_and_interfaces/main.kt -o /tmp/ex03_bin
-/tmp/ex03_bin
-
-# Output:
-# Developer: Alice | Role: Compiler Engineer | Primary Language: Rust
-# Developer: Bob | Role: Runtime Architect | Primary Language: Zig
-```
-
----
-
-### Tutorial 4: Lambdas, Higher-Order Functions & Collections
-
-Source: `examples/04_lambdas_and_collections/main.kt`
-
-Demonstrates generic extension functions (`List<T>.customFilter`), trailing lambda syntax, and collection transformations:
-
-```kotlin
-package examples.lambdas
-
-fun <T> List<T>.customFilter(predicate: (T) -> Boolean): List<T> {
-    val result = mutableListOf<T>()
-    for (item in this) {
-        if (predicate(item)) {
-            result.add(item)
-        }
-    }
-    return result
-}
-
-fun main() {
-    val numbers = listOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-
-    val evens = numbers.customFilter { it % 2 == 0 }
-    val doubled = evens.map { it * 2 }
-
-    println("Original: $numbers")
-    println("Evens:    $evens")
-    println("Doubled:  $doubled")
-}
-```
-
-#### Running & Compiling:
-```bash
+k3 run examples/01_hello_world/main.kt
 k3 run examples/04_lambdas_and_collections/main.kt
-
-# Output:
-# Original: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-# Evens:    [2, 4, 6, 8, 10]
-# Doubled:  [4, 8, 12, 16, 20]
 ```
 
----
-
-### Tutorial 5: Suspend Functions & Coroutines CPS Lowerings
-
-Source: `examples/05_coroutines/main.kt`
-
-Demonstrates coroutines lowered into Continuation-Passing Style (CPS) state machines:
-
-```kotlin
-package examples.coroutines
-
-suspend fun fetchCompilerStatus(): String {
-    // Represents an asynchronous task lowered to CPS state machine
-    return "Kotlin3 compiler is ready."
-}
-
-suspend fun computeBuildTime(): Long {
-    return 15L // 15ms target
-}
-
-fun main() {
-    println("Coroutines transform suspend functions into state-machines.")
-    println("Kotlin3 lowers these in k3_ir via AddContinuationLowering.")
-}
-```
-
-#### Inspecting the Lowered Universal IR:
-```bash
-k3 ir examples/05_coroutines/main.kt
-```
-
-The output reveals how `fetchCompilerStatus` is converted to CPS with `$completion: Continuation<Any?>` and an automatically synthesized state machine continuation class.
-
----
-
-## 🎯 Compilation Targets: JVM vs Native
-
-Kotlin3 provides dual compilation backends out of the box:
-
-| Feature | `k3 build` (JVM Target) | `k3 native` (Zig Native Target) |
-| :--- | :--- | :--- |
-| **Output Format** | Standard `.class` in a runnable `.jar` | Statically linkable ELF x86_64 binary |
-| **Execution Tool** | `java -jar <app.jar>` | Direct execution: `./<app_bin>` |
-| **Startup Latency** | 40 ms – 95 ms (HotSpot classloading) | **0.59 ms – 0.78 ms (Sub-millisecond)** |
-| **Output Footprint** | ~5 KB (bytecode only) + requires JVM | **~980 KB (Self-contained executable)** |
-| **External Dependencies**| OpenJDK / JRE runtime | **Zero dependencies** |
-| **Best Used For** | Server backends, Android, Java interop | CLI tools, microservices, cloud lambdas |
-
----
-
-## 🏎️ Benchmarking & Comparative Verification
-
-You can reproduce the benchmarks comparing `k3` against official JetBrains `kotlinc` K2:
+Force a specific compilation engine or pass runtime arguments:
 
 ```bash
-# Run the automated benchmark script
-python3 scripts/benchmark_compare.py
+# Force Rust direct-to-JVM bytecode compiler (~1.7–4 ms)
+k3 run --fast benches/compute_benchmark.kt
+
+# Force official kotlinc 2.4.21 + k3-runtime.jar (with SHA-256 JAR cache)
+k3 run --kotlinc examples/02_control_flow/main.kt -- arg1 arg2
+
+# Bypass cached JARs
+k3 run --no-cache samples/hello.kt
 ```
 
-Results show:
-1. **Cold Build Time**: `k3 build` compiles to runnable JAR in **1.7 ms** vs **6,100 ms** for `kotlinc` (**~3,500x speedup**).
-2. **Native Execution Speed**: Native standalone binary executes in **0.6 ms** vs **75 ms** for Java (**~120x faster**).
-3. **Output Matching**: 100% byte-for-byte identical output across all suites.
+---
+
+## 3. Zero-Gradle Project Workflow (`uv` / `bun` Style)
+
+### Initialize a Project
+
+```bash
+k3 init hello-k3
+cd hello-k3
+```
+
+Generated layout:
+```text
+hello-k3/
+├── k3.toml
+├── src/
+│   └── Main.kt
+└── tests/
+    └── MainTest.kt
+```
+
+### Type-Check, Run & Test
+
+```bash
+k3 check           # Fast Rust syntax & semantic FIR check across project files
+k3 check --strict  # Also runs kotlinc type-checking with k3-runtime and locked deps
+k3 run             # Runs project entry (or `k3 run <script-name>`)
+k3 test            # Compiles and runs tests/**/*.kt with k3.test
+```
+
+### Manage Maven Central Dependencies
+
+```bash
+# Resolve latest version from Maven Central, update k3.toml, lock SHA-256 in k3.lock
+k3 add org.json:json
+
+# Pin a specific version or add a dev dependency
+k3 add com.google.code.gson:gson:2.11.0
+k3 add org.junit.jupiter:junit-jupiter-api --dev
+
+# Refresh lockfile or remove a dependency
+k3 sync --refresh
+k3 remove org.json:json
+```
+
+### Build Distributable JARs
+
+```bash
+# Thin project JAR
+k3 build -o build/app.jar
+
+# Self-contained executable uber-JAR (includes Kotlin stdlib, k3-runtime, & Maven deps)
+k3 build --fat -o dist/hello-k3-all.jar
+java -jar dist/hello-k3-all.jar
+```
 
 ---
 
-## ❓ Troubleshooting & Frequently Asked Questions
+## 4. Built-In Kotlin Runtime (`k3.runtime` & `k3.test`)
 
-### 1. `k3 native: Zig compiler not found`
-* **Solution**: Ensure Zig 0.17+ is installed. By default, `k3` checks `/opt/zig/zig` and your system `PATH`. You can also set `export ZIG_EXE=/path/to/zig`.
+Every project managed by `k3` automatically receives `k3-runtime.jar` on its compile and runtime classpaths (see [`examples/06_k3_project_and_runtime`](../examples/06_k3_project_and_runtime)):
 
-### 2. Can I use existing Java libraries with `k3`?
-* **Answer**: Yes! Compiling with `k3 build <file.kt> -o out.jar` generates standard JVM classfiles that interoperate with Java libraries and run on any Java 8+ runtime.
-
-### 3. How do I inspect the tokens or syntax tree of a Kotlin file?
-* Use `k3 lex <file.kt>` to view the SIMD token stream.
-* Use `k3 parse <file.kt>` to view the complete AST representation.
-* Use `k3 ir <file.kt>` to inspect the lowered Universal Backend IR.
+- **`K3Env`**: `get(name, default)`, `int(name, default)`, `requirePositiveInt(name, default)`
+- **`K3Time`**: `measure { ... }` -> `TimedResult(value, elapsedMs)`, `formatMs(ms)`
+- **`K3Fs`**: `readText`, `writeText`, `exists`, `listFiles`
+- **`K3Process`**: `exec(vararg command, workDir)` -> `CommandOutput(exitCode, stdout, stderr)`
+- **`K3Http`**: `get(url)`, `post(url, body, contentType)` -> `HttpResponseData(status, body)`
+- **`K3Async`**: `parallel(tasks)` running tasks concurrently on Java virtual threads
+- **`K3Json`**: lightweight dependency-free JSON `stringify(value)` and `parse(input)`
+- **`k3.test`**: `runTests(suiteName) { test(name) { ... } }`, `expectEquals`, `expectTrue`, `expectThrows`
 
 ---
 
-*Kotlin3 is open-source software licensed under the [Apache 2.0 License](https://github.com/babar-xagi/kotlin3/blob/main/LICENSE).*
+## 5. Cache & Workspace Inspection
+
+```bash
+k3 info          # Active toolchain, project manifest, and dependency summary
+k3 cache status  # Cache sizes under ~/.k3/cache (builds, runtime, maven)
+k3 cache clean   # Clear cached JARs and force clean rebuilds
+```

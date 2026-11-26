@@ -17,6 +17,8 @@ pub enum DiagnosticCode {
     WrongNumberOfArguments { expected: usize, actual: usize },
     DuplicateDeclaration(String),
     CannotInferType(String),
+    SuspendCallOutsideCoroutine(String),
+    AbstractMemberNotImplemented { class_name: String, member: String },
 }
 
 impl fmt::Display for DiagnosticCode {
@@ -35,13 +37,19 @@ impl fmt::Display for DiagnosticCode {
                 write!(f, "Condition must be of type 'Boolean', found '{}'", actual)
             }
             DiagnosticCode::WrongNumberOfArguments { expected, actual } => {
-                write!(f, "No value passed for parameter (expected {}, found {})", expected, actual)
+                write!(f, "Wrong number of arguments: expected {}, found {}", expected, actual)
             }
             DiagnosticCode::DuplicateDeclaration(name) => {
                 write!(f, "Conflicting declaration: '{}'", name)
             }
             DiagnosticCode::CannotInferType(name) => {
                 write!(f, "Cannot infer type for '{}', please specify type explicitly", name)
+            }
+            DiagnosticCode::SuspendCallOutsideCoroutine(name) => {
+                write!(f, "Suspend function '{}' should be called only from a coroutine or another suspend function", name)
+            }
+            DiagnosticCode::AbstractMemberNotImplemented { class_name, member } => {
+                write!(f, "Class '{}' is not abstract and does not implement abstract member '{}'", class_name, member)
             }
         }
     }

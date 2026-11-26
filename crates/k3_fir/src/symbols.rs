@@ -8,6 +8,10 @@ pub struct FunctionSymbol {
     pub type_params: Vec<String>,
     pub receiver_type: Option<ConeKotlinType>,
     pub value_params: Vec<(String, ConeKotlinType)>,
+    pub required_params: usize,
+    pub is_vararg: bool,
+    pub is_suspend: bool,
+    pub has_body: bool,
     pub return_type: ConeKotlinType,
     pub modifiers: Vec<Modifier>,
 }
@@ -25,6 +29,7 @@ pub struct ClassSymbol {
     pub name: String,
     pub kind: ClassKind,
     pub super_types: Vec<ConeKotlinType>,
+    pub primary_params: Vec<(String, ConeKotlinType, bool)>,
     pub methods: HashMap<String, Vec<FunctionSymbol>>,
     pub properties: HashMap<String, PropertySymbol>,
     pub modifiers: Vec<Modifier>,
@@ -112,7 +117,6 @@ impl Scope {
     pub fn root() -> Self {
         let mut scope = Self::new();
 
-        // Built-in standard library classes
         let builtins = [
             ("Any", ClassKind::Class),
             ("Int", ClassKind::Class),
@@ -134,7 +138,6 @@ impl Scope {
         for (name, kind) in builtins {
             let mut methods = HashMap::new();
             if name == "String" || name == "Int" || name == "Long" {
-                // String / numeric common methods
                 methods.insert(
                     "toString".to_string(),
                     vec![FunctionSymbol {
@@ -142,6 +145,10 @@ impl Scope {
                         type_params: vec![],
                         receiver_type: None,
                         value_params: vec![],
+                        required_params: 0,
+                        is_vararg: false,
+                        is_suspend: false,
+                        has_body: true,
                         return_type: ConeKotlinType::string(),
                         modifiers: vec![],
                     }],
@@ -154,6 +161,10 @@ impl Scope {
                         type_params: vec![],
                         receiver_type: None,
                         value_params: vec![("element".to_string(), ConeKotlinType::any(true))],
+                        required_params: 1,
+                        is_vararg: false,
+                        is_suspend: false,
+                        has_body: true,
                         return_type: ConeKotlinType::boolean(),
                         modifiers: vec![],
                     }],
@@ -165,6 +176,10 @@ impl Scope {
                         type_params: vec!["R".to_string()],
                         receiver_type: None,
                         value_params: vec![("transform".to_string(), ConeKotlinType::any(false))],
+                        required_params: 0,
+                        is_vararg: false,
+                        is_suspend: false,
+                        has_body: true,
                         return_type: ConeKotlinType::ClassLike {
                             name: "kotlin.collections.List".to_string(),
                             type_arguments: vec![ConeProjection::Star],
@@ -174,12 +189,16 @@ impl Scope {
                     }],
                 );
                 methods.insert(
-                    "customFilter".to_string(),
+                    "filter".to_string(),
                     vec![FunctionSymbol {
-                        name: "customFilter".to_string(),
+                        name: "filter".to_string(),
                         type_params: vec![],
                         receiver_type: None,
                         value_params: vec![("predicate".to_string(), ConeKotlinType::any(false))],
+                        required_params: 0,
+                        is_vararg: false,
+                        is_suspend: false,
+                        has_body: true,
                         return_type: ConeKotlinType::ClassLike {
                             name: "kotlin.collections.List".to_string(),
                             type_arguments: vec![ConeProjection::Star],
@@ -194,18 +213,23 @@ impl Scope {
                 name: name.to_string(),
                 kind,
                 super_types: vec![ConeKotlinType::any(false)],
+                primary_params: vec![],
                 methods,
                 properties: HashMap::new(),
                 modifiers: vec![],
             });
         }
 
-        // Global functions: println, print, listOf, mutableListOf
+        // Global stdlib functions
         scope.insert_function(FunctionSymbol {
             name: "println".to_string(),
             type_params: vec![],
             receiver_type: None,
             value_params: vec![("message".to_string(), ConeKotlinType::any(true))],
+            required_params: 0,
+            is_vararg: false,
+            is_suspend: false,
+            has_body: true,
             return_type: ConeKotlinType::unit(),
             modifiers: vec![],
         });
@@ -214,6 +238,10 @@ impl Scope {
             type_params: vec![],
             receiver_type: None,
             value_params: vec![],
+            required_params: 0,
+            is_vararg: false,
+            is_suspend: false,
+            has_body: true,
             return_type: ConeKotlinType::unit(),
             modifiers: vec![],
         });
@@ -222,6 +250,10 @@ impl Scope {
             type_params: vec![],
             receiver_type: None,
             value_params: vec![("message".to_string(), ConeKotlinType::any(true))],
+            required_params: 1,
+            is_vararg: false,
+            is_suspend: false,
+            has_body: true,
             return_type: ConeKotlinType::unit(),
             modifiers: vec![],
         });
@@ -230,6 +262,10 @@ impl Scope {
             type_params: vec!["T".to_string()],
             receiver_type: None,
             value_params: vec![("elements".to_string(), ConeKotlinType::any(true))],
+            required_params: 0,
+            is_vararg: true,
+            is_suspend: false,
+            has_body: true,
             return_type: ConeKotlinType::ClassLike {
                 name: "kotlin.collections.List".to_string(),
                 type_arguments: vec![ConeProjection::Star],
@@ -241,7 +277,11 @@ impl Scope {
             name: "mutableListOf".to_string(),
             type_params: vec!["T".to_string()],
             receiver_type: None,
-            value_params: vec![],
+            value_params: vec![("elements".to_string(), ConeKotlinType::any(true))],
+            required_params: 0,
+            is_vararg: true,
+            is_suspend: false,
+            has_body: true,
             return_type: ConeKotlinType::ClassLike {
                 name: "kotlin.collections.MutableList".to_string(),
                 type_arguments: vec![ConeProjection::Star],
@@ -249,6 +289,32 @@ impl Scope {
             },
             modifiers: vec![],
         });
+        for (fn_name, col_type) in [
+            ("emptyList", "kotlin.collections.List"),
+            ("setOf", "kotlin.collections.Set"),
+            ("mutableSetOf", "kotlin.collections.MutableSet"),
+            ("emptySet", "kotlin.collections.Set"),
+            ("mapOf", "kotlin.collections.Map"),
+            ("mutableMapOf", "kotlin.collections.MutableMap"),
+            ("emptyMap", "kotlin.collections.Map"),
+        ] {
+            scope.insert_function(FunctionSymbol {
+                name: fn_name.to_string(),
+                type_params: vec!["T".to_string()],
+                receiver_type: None,
+                value_params: vec![("elements".to_string(), ConeKotlinType::any(true))],
+                required_params: 0,
+                is_vararg: true,
+                is_suspend: false,
+                has_body: true,
+                return_type: ConeKotlinType::ClassLike {
+                    name: col_type.to_string(),
+                    type_arguments: vec![ConeProjection::Star],
+                    nullability: ConeNullability::NotNull,
+                },
+                modifiers: vec![],
+            });
+        }
 
         scope
     }

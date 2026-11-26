@@ -95,9 +95,8 @@ mod tests {
     fn test_function_inlining_lowering() {
         let code = r#"
             package test.inlining
-            inline fun execute(action: () -> Unit) {
-                action()
-            }
+            inline fun doubleIt(x: Int): Int = x * 2
+            fun main(): Int = doubleIt(21)
         "#;
         let mut lexer = Lexer::new(code);
         let tokens = lexer.tokenize().unwrap();
@@ -105,11 +104,13 @@ mod tests {
         let ast = parser.parse_file().unwrap();
 
         let ir = compile_to_lowered_ir(&ast, "inline.kt");
-        let func = ir.declarations.iter().find_map(|d| match d {
-            IrDeclaration::Function(f) if f.name == "execute" => Some(f),
+        let main_fn = ir.declarations.iter().find_map(|d| match d {
+            IrDeclaration::Function(f) if f.name == "main" => Some(f),
             _ => None,
         }).unwrap();
 
-        assert!(func.is_inline);
+        let stmt = &main_fn.body.as_ref().unwrap().statements[0];
+        let debug_str = format!("{:?}", stmt);
+        assert!(debug_str.contains("times"), "doubleIt call should inline x * 2 into main, got: {}", debug_str);
     }
 }

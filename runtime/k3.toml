@@ -1,0 +1,7 @@
+[package]
+name = "k3-runtime"
+version = "0.7.0"
+kotlin = "2.4.21"
+entry = "src/main/kotlin/k3/runtime/Runtime.kt"
+
+[dependencies]

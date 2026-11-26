@@ -11,6 +11,17 @@ impl CodeBuilder {
         Self::default()
     }
 
+    pub fn stack_depth(&self) -> u16 {
+        self.current_stack
+    }
+
+    pub fn set_stack_depth(&mut self, depth: u16) {
+        self.current_stack = depth;
+        if self.current_stack > self.max_stack {
+            self.max_stack = self.current_stack;
+        }
+    }
+
     fn push_stack(&mut self, n: u16) {
         self.current_stack += n;
         if self.current_stack > self.max_stack {
@@ -91,7 +102,7 @@ impl CodeBuilder {
     }
 
     pub fn iload(&mut self, slot: u16) {
-        if slot > self.max_locals {
+        if slot >= self.max_locals {
             self.max_locals = slot + 1;
         }
         match slot {
@@ -635,6 +646,62 @@ impl CodeBuilder {
         if has_return {
             self.push_stack(1);
         }
+    }
+
+    pub fn invokevirtual_ret(&mut self, cp_method_index: u16, arg_slots: u16, ret_slots: u16) {
+        self.bytes.push(0xb6);
+        self.bytes.extend_from_slice(&cp_method_index.to_be_bytes());
+        self.pop_stack(1 + arg_slots);
+        if ret_slots > 0 {
+            self.push_stack(ret_slots);
+        }
+    }
+
+    pub fn invokestatic_ret(&mut self, cp_method_index: u16, arg_slots: u16, ret_slots: u16) {
+        self.bytes.push(0xb8);
+        self.bytes.extend_from_slice(&cp_method_index.to_be_bytes());
+        self.pop_stack(arg_slots);
+        if ret_slots > 0 {
+            self.push_stack(ret_slots);
+        }
+    }
+
+    pub fn invokeinterface_ret(&mut self, cp_method_index: u16, arg_slots: u16, ret_slots: u16) {
+        self.bytes.push(0xb9);
+        self.bytes.extend_from_slice(&cp_method_index.to_be_bytes());
+        self.bytes.push((arg_slots + 1) as u8);
+        self.bytes.push(0);
+        self.pop_stack(1 + arg_slots);
+        if ret_slots > 0 {
+            self.push_stack(ret_slots);
+        }
+    }
+
+    pub fn getfield_slots(&mut self, cp_field_index: u16, field_slots: u16) {
+        self.bytes.push(0xb4);
+        self.bytes.extend_from_slice(&cp_field_index.to_be_bytes());
+        self.pop_stack(1);
+        self.push_stack(field_slots);
+    }
+
+    pub fn putfield_slots(&mut self, cp_field_index: u16, field_slots: u16) {
+        self.bytes.push(0xb5);
+        self.bytes.extend_from_slice(&cp_field_index.to_be_bytes());
+        self.pop_stack(1 + field_slots);
+    }
+
+    pub fn freturn(&mut self) {
+        self.bytes.push(0xae);
+        self.pop_stack(1);
+    }
+
+    pub fn fconst_0(&mut self) {
+        self.bytes.push(0x0b);
+        self.push_stack(1);
+    }
+
+    pub fn swap(&mut self) {
+        self.bytes.push(0x5f);
     }
 
     pub fn pop(&mut self) {

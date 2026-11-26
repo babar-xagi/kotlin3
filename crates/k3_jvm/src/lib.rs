@@ -97,4 +97,20 @@ mod tests {
             assert_eq!(&bytes[0..4], &[0xCA, 0xFE, 0xBA, 0xBE], "class {} magic mismatch", name);
         }
     }
+
+    #[test]
+    fn test_compile_examples_when_interface_lambdas() {
+        let ex2 = include_str!("../../../examples/02_control_flow/main.kt");
+        let ex3 = include_str!("../../../examples/03_classes_and_interfaces/main.kt");
+        let ex4 = include_str!("../../../examples/04_lambdas_and_collections/main.kt");
+
+        for (fname, src) in [("ex2.kt", ex2), ("ex3.kt", ex3), ("ex4.kt", ex4)] {
+            let mut lexer = k3_syntax::lexer::Lexer::new(src);
+            let tokens = lexer.tokenize().unwrap();
+            let mut parser = k3_syntax::parser::Parser::new(tokens, src.len() as u32);
+            let ast = parser.parse_file().unwrap();
+            let classes = compile_to_classes(&ast, fname).expect("compile failed");
+            assert!(!classes.is_empty());
+        }
+    }
 }
